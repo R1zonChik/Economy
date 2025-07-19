@@ -325,34 +325,43 @@ public class AuctionCommand implements Command, Listener {
         return button;
     }
 
-    // ==================== ОБРАБОТЧИКИ СОБЫТИЙ ====================
-
     @EventHandler
     public void onInventoryClick(InventoryClickEvent event) {
         if (!(event.getWhoClicked() instanceof Player)) return;
         Player player = (Player) event.getWhoClicked();
 
-        // ВАЖНО: Проверяем что это НАШЕ меню!
-        String menuType = playerMenus.get(player.getName());
-        if (menuType == null) return; // Не наше меню - не трогаем!
-
-        // Проверяем что заголовок инвентаря соответствует нашим меню
         String title = event.getView().getTitle();
         if (!isOurInventory(title)) {
-            return; // Не наш инвентарь - не трогаем!
+            return;
         }
 
-        // ИСПРАВЛЕНИЕ БАГА: ОТМЕНЯЕМ ВСЕ КЛИКИ В НАШИХ МЕНЮ
         event.setCancelled(true);
+
+        String menuType = playerMenus.get(player.getName());
+        if (menuType == null) {
+            String cleanTitle = title.replace("§", "&");
+            if (cleanTitle.contains("Категории аукциона")) {
+                menuType = "categories";
+                playerMenus.put(player.getName(), menuType);
+            } else if (cleanTitle.contains("Истекшие предметы")) {
+                menuType = "expired";
+                playerMenus.put(player.getName(), menuType);
+            } else if (cleanTitle.contains("Премиум магазин")) {
+                menuType = "premium";
+                playerMenus.put(player.getName(), menuType);
+            } else {
+                menuType = "auction";
+                playerMenus.put(player.getName(), menuType);
+            }
+        }
 
         ItemStack clickedItem = event.getCurrentItem();
         if (clickedItem == null || clickedItem.getType() == Material.AIR) return;
 
         int slot = event.getSlot();
 
-        // Проверяем что клик в верхнем инвентаре (наше меню)
         if (event.getClickedInventory() != event.getView().getTopInventory()) {
-            return; // Клик в инвентаре игрока - не обрабатываем
+            return;
         }
 
         switch (menuType) {
@@ -376,7 +385,6 @@ public class AuctionCommand implements Command, Listener {
         if (!(event.getPlayer() instanceof Player)) return;
         Player player = (Player) event.getPlayer();
 
-        // Очищаем данные игрока при закрытии инвентаря
         String title = event.getView().getTitle();
         if (isOurInventory(title)) {
             playerMenus.remove(player.getName());
@@ -387,7 +395,6 @@ public class AuctionCommand implements Command, Listener {
     }
 
     private boolean isOurInventory(String title) {
-        // Проверяем что это один из наших инвентарей
         String cleanTitle = title.replace("§", "&");
         return cleanTitle.contains("Аукцион") ||
                 cleanTitle.contains("Категории аукциона") ||
@@ -432,15 +439,17 @@ public class AuctionCommand implements Command, Listener {
     }
 
     private void handleCategoryClick(Player player, int slot) {
-        if (slot == 22) { // Все категории
+        if (slot == 22) {
             openAuctionMenu(player, playerCurrency.get(player.getName()), "ALL", 0);
             return;
         }
 
         ConfigurationSection categoriesConfig = Economy.getInstance().getConfig().getConfigurationSection("auction.categories");
-        if (categoriesConfig == null) return;
+        if (categoriesConfig == null) {
+            player.sendMessage(colorize("&cОшибка: конфигурация категорий не найдена!"));
+            return;
+        }
 
-        // ИСПРАВЛЕНО: Правильный маппинг слотов к категориям
         int categoryIndex = slot - 10;
         List<String> categories = new ArrayList<>(categoriesConfig.getKeys(false));
 
