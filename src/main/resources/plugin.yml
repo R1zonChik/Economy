@@ -1,0 +1,210 @@
+name: Economy
+version: '${project.version}'
+main: xyz.moorus.economy.main.Economy
+api-version: '1.21'
+softdepend: [MedievalFactions, PlaceholderAPI]
+authors: [Moorus]
+description: Advanced economy system with factions, auction, and currency exchange
+
+commands:
+  pw:
+    description: Показать кошелек
+    usage: /pw [страница]
+    aliases: [wallet, balance]
+
+  pay:
+    description: Перевести деньги
+    usage: /pay <игрок> <валюта> <сумма>
+    aliases: [transfer, send]
+
+  cc:
+    description: Создать валюту
+    usage: /cc <код_валюты> <лимит_эмиссии>
+    aliases: [createcurrency]
+
+  emit:
+    description: Выпустить валюту
+    usage: /emit <валюта> <количество>
+    aliases: [emission]
+
+  bourse:
+    description: Биржа валют
+    usage: /bourse [действие]
+    aliases: [exchange, market]
+
+  ah:
+    description: Аукцион
+    usage: /ah [валюта] [категория]
+    aliases: [auction, auctionhouse]
+
+  sellhand:
+    description: Продать предмет в руке
+    usage: /sellhand <валюта> <цена>
+    aliases: [sell]
+
+  ecoadmin:
+    description: Админские команды
+    usage: /ecoadmin <действие>
+    aliases: [economyadmin, eadmin]
+
+permissions:
+  economy.*:
+    description: Все права Economy
+    default: op
+    children:
+      economy.admin: true
+      economy.auction.*: true
+      economy.bourse.*: true
+      economy.currency.*: true
+
+  economy.admin:
+    description: Админские права
+    default: op
+    children:
+      economy.admin.givemoney: true
+      economy.admin.takemoney: true
+      economy.admin.reload: true
+      economy.admin.cleanup: true
+      economy.admin.premium: true
+
+  economy.admin.givemoney:
+    description: Выдача денег игрокам
+    default: op
+
+  economy.admin.takemoney:
+    description: Изъятие денег у игроков
+    default: op
+
+  economy.admin.reload:
+    description: Перезагрузка конфигурации
+    default: op
+
+  economy.admin.cleanup:
+    description: Очистка базы данных
+    default: op
+
+  economy.admin.premium:
+    description: Управление премиум магазином
+    default: op
+
+  # Права на аукцион
+  economy.auction.*:
+    description: Все права аукциона
+    default: true
+    children:
+      economy.auction.use: true
+      economy.auction.sell: true
+      economy.auction.buy: true
+      economy.auction.max.1: true
+
+  economy.auction.use:
+    description: Использование аукциона
+    default: true
+
+  economy.auction.sell:
+    description: Продажа на аукционе
+    default: true
+
+  economy.auction.buy:
+    description: Покупка с аукциона
+    default: true
+
+  economy.auction.max.1:
+    description: Максимум 1 предмет на аукционе
+    default: true
+
+  economy.auction.max.3:
+    description: Максимум 3 предмета на аукционе
+    default: false
+
+  economy.auction.max.5:
+    description: Максимум 5 предметов на аукционе
+    default: false
+
+  economy.auction.max.10:
+    description: Максимум 10 предметов на аукционе
+    default: false
+
+  economy.auction.max.25:
+    description: Максимум 25 предметов на аукционе
+    default: false
+
+  economy.auction.max.50:
+    description: Максимум 50 предметов на аукционе
+    default: false
+
+  economy.auction.max.unlimited:
+    description: Неограниченное количество предметов на аукционе
+    default: false
+
+  # Права на биржу
+  economy.bourse.*:
+    description: Все права биржи
+    default: true
+    children:
+      economy.bourse.use: true
+      economy.bourse.create: true
+      economy.bourse.buy: true
+      economy.bourse.cancel: true
+      economy.bourse.max.3: true
+
+  economy.bourse.use:
+    description: Использование биржи
+    default: true
+
+  economy.bourse.create:
+    description: Создание ордеров
+    default: true
+
+  economy.bourse.buy:
+    description: Покупка по ордерам
+    default: true
+
+  economy.bourse.cancel:
+    description: Отмена своих ордеров
+    default: true
+
+  economy.bourse.max.3:
+    description: Максимум 3 ордера на бирже
+    default: true
+
+  economy.bourse.max.5:
+    description: Максимум 5 ордеров на бирже
+    default: false
+
+  economy.bourse.max.10:
+    description: Максимум 10 ордеров на бирже
+    default: false
+
+  economy.bourse.max.15:
+    description: Максимум 15 ордеров на бирже
+    default: false
+
+  economy.bourse.max.20:
+    description: Максимум 20 ордеров на бирже
+    default: false
+
+  economy.bourse.max.unlimited:
+    description: Неограниченное количество ордеров на бирже
+    default: false
+
+  # Права на валюты
+  economy.currency.*:
+    description: Все права валют
+    default: true
+    children:
+      economy.currency.create: true
+      economy.currency.emit: true
+      economy.currency.transfer: true
+
+  economy.currency.create:
+    description: Создание валют
+    default: true
+
+  economy.currency.emit:
+    description: Эмиссия валют
+    default: true
+
+  economy.currency.transfer:
+    description: Переводы валют
+    default: true
