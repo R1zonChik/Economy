@@ -38,20 +38,23 @@ public class AdminCommand implements Command {
         String action = args[0].toLowerCase();
 
         switch (action) {
+            case "givemoney":
+                handleGiveMoney(player, args);
+                break;
+            case "takemoney":
+                handleTakeMoney(player, args);
+                break;
+            case "givevil":
+                handleGiveVil(player, args);
+                break;
             case "addpremium":
                 handleAddPremium(player, args);
                 break;
             case "removepremium":
                 handleRemovePremium(player, args);
                 break;
-            case "givevil":
-                handleGiveVil(player, args);
-                break;
-            case "givemoney":
-                handleGiveMoney(player, args);
-                break;
-            case "takemoney":
-                handleTakeMoney(player, args);
+            case "listpremium":
+                handleListPremium(player);
                 break;
             case "reload":
                 handleReload(player);
@@ -62,257 +65,372 @@ public class AdminCommand implements Command {
             case "stats":
                 handleStats(player);
                 break;
-            case "help":
             default:
                 showHelp(player);
                 break;
         }
     }
 
-    private void showHelp(Player player) {
-        player.sendMessage(colorize("&6=== Economy Admin ==="));
-        player.sendMessage(colorize("&7/ecoadmin addpremium <цена> <название> <описание> [количество]"));
-        player.sendMessage(colorize("&7/ecoadmin removepremium <id>"));
-        player.sendMessage(colorize("&7/ecoadmin givevil <игрок> <количество>"));
-        player.sendMessage(colorize("&7/ecoadmin givemoney <игрок> <валюта> <количество>"));
-        player.sendMessage(colorize("&7/ecoadmin takemoney <игрок> <валюта> <количество>"));
-        player.sendMessage(colorize("&7/ecoadmin reload"));
-        player.sendMessage(colorize("&7/ecoadmin cleanup"));
-        player.sendMessage(colorize("&7/ecoadmin stats"));
-        player.sendMessage(colorize("&e"));
-        player.sendMessage(colorize("&7Для addpremium возьмите предмет в руку"));
-    }
-
-    private void handleAddPremium(Player player, String[] args) {
-        if (args.length < 4) {
-            player.sendMessage(colorize("&cИспользование: /ecoadmin addpremium <цена> <название> <описание> [количество]"));
-            return;
-        }
-
-        ItemStack itemInHand = player.getInventory().getItemInMainHand();
-        if (itemInHand == null || itemInHand.getType().isAir()) {
-            player.sendMessage(colorize("&cВозьмите предмет в руку!"));
-            return;
-        }
-
-        try {
-            long price = Long.parseLong(args[1]);
-            String displayName = args[2].replace("_", " ");
-            String description = args[3].replace("_", " ");
-            int stock = args.length > 4 ? Integer.parseInt(args[4]) : -1;
-
-            if (price <= 0) {
-                player.sendMessage(colorize("&cЦена должна быть больше 0!"));
-                return;
-            }
-
-            Database database = Economy.getInstance().getDatabase();
-            String itemData = serializeItem(itemInHand);
-            String category = getItemCategory(itemInHand.getType());
-
-            int itemId = database.addPremiumShopItem(itemData, price, category, displayName, description, stock);
-
-            if (itemId > 0) {
-                player.sendMessage(colorize("&aПредмет добавлен в премиум магазин!"));
-                player.sendMessage(colorize("&7ID: " + itemId));
-                player.sendMessage(colorize("&7Название: " + displayName));
-                player.sendMessage(colorize("&7Цена: " + price + " VIL"));
-                player.sendMessage(colorize("&7Количество: " + (stock == -1 ? "∞" : stock)));
-            } else {
-                player.sendMessage(colorize("&cОшибка при добавлении предмета!"));
-            }
-
-        } catch (NumberFormatException e) {
-            player.sendMessage(colorize("&cНеверная цена или количество!"));
-        }
-    }
-
-    private void handleRemovePremium(Player player, String[] args) {
-        if (args.length < 2) {
-            player.sendMessage(colorize("&cИспользование: /ecoadmin removepremium <id>"));
-            return;
-        }
-
-        try {
-            int itemId = Integer.parseInt(args[1]);
-            Database database = Economy.getInstance().getDatabase();
-
-            if (database.removePremiumShopItem(itemId)) {
-                player.sendMessage(colorize("&aПредмет удален из премиум магазина!"));
-            } else {
-                player.sendMessage(colorize("&cПредмет не найден!"));
-            }
-
-        } catch (NumberFormatException e) {
-            player.sendMessage(colorize("&cНеверный ID предмета!"));
-        }
-    }
-
-    private void handleGiveVil(Player player, String[] args) {
-        if (args.length < 3) {
-            player.sendMessage(colorize("&cИспользование: /ecoadmin givevil <игрок> <количество>"));
-            return;
-        }
-
-        String targetName = args[1];
-
-        try {
-            int amount = Integer.parseInt(args[2]);
-
-            if (amount <= 0) {
-                player.sendMessage(colorize("&cКоличество должно быть больше 0!"));
-                return;
-            }
-
-            WalletManager walletManager = Economy.getInstance().getWalletManager();
-            PaymentResult result = walletManager.putMoney(targetName, "VIL", amount);
-
-            if (result == PaymentResult.SUCCESS) {
-                player.sendMessage(colorize("&aВыдано " + String.format("%,d", amount) + " VIL игроку " + targetName));
-                Player target = Bukkit.getPlayer(targetName);
-                if (target != null) {
-                    target.sendMessage(colorize("&aВы получили " + String.format("%,d", amount) + " VIL от администратора!"));
-                }
-
-                // Логируем транзакцию
-                Database database = Economy.getInstance().getDatabase();
-                database.logTransaction("SYSTEM", targetName, "VIL", amount, "ADMIN_GIVE", "Admin gave VIL");
-
-            } else {
-                player.sendMessage(colorize("&cОшибка при выдаче валюты: " + result.name()));
-            }
-
-        } catch (NumberFormatException e) {
-            player.sendMessage(colorize("&cНеверное количество!"));
-        }
-    }
-
     private void handleGiveMoney(Player player, String[] args) {
-        if (args.length < 4) {
+        if (!player.hasPermission("economy.admin.givemoney")) {
+            player.sendMessage(colorize("&cНет прав!"));
+            return;
+        }
+
+        if (args.length != 4) {
             player.sendMessage(colorize("&cИспользование: /ecoadmin givemoney <игрок> <валюта> <количество>"));
             return;
         }
 
-        String targetName = args[1];
+        String targetPlayer = args[1];
         String currency = args[2].toUpperCase();
+        int amount;
 
         try {
-            int amount = Integer.parseInt(args[3]);
-
-            if (amount <= 0) {
-                player.sendMessage(colorize("&cКоличество должно быть больше 0!"));
-                return;
-            }
-
-            WalletManager walletManager = Economy.getInstance().getWalletManager();
-
-            if (!walletManager.currencyExists(currency)) {
-                player.sendMessage(colorize("&cВалюта " + currency + " не существует!"));
-                return;
-            }
-
-            PaymentResult result = walletManager.putMoney(targetName, currency, amount);
-
-            if (result == PaymentResult.SUCCESS) {
-                player.sendMessage(colorize("&aВыдано " + String.format("%,d", amount) + " " + currency + " игроку " + targetName));
-                Player target = Bukkit.getPlayer(targetName);
-                if (target != null) {
-                    target.sendMessage(colorize("&aВы получили " + String.format("%,d", amount) + " " + currency + " от администратора!"));
-                }
-
-                // Логируем транзакцию
-                Database database = Economy.getInstance().getDatabase();
-                database.logTransaction("SYSTEM", targetName, currency, amount, "ADMIN_GIVE", "Admin gave " + currency);
-
-            } else {
-                player.sendMessage(colorize("&cОшибка при выдаче валюты: " + result.name()));
-            }
-
+            amount = Integer.parseInt(args[3]);
         } catch (NumberFormatException e) {
             player.sendMessage(colorize("&cНеверное количество!"));
+            return;
+        }
+
+        if (amount <= 0) {
+            player.sendMessage(colorize("&cКоличество должно быть больше 0!"));
+            return;
+        }
+
+        WalletManager walletManager = Economy.getInstance().getWalletManager();
+        Database database = Economy.getInstance().getDatabase();
+
+        if (!database.playerHasWallet(targetPlayer)) {
+            player.sendMessage(colorize("&cИгрок не найден!"));
+            return;
+        }
+
+        if (!walletManager.currencyExists(currency)) {
+            player.sendMessage(colorize("&cВалюта не существует!"));
+            return;
+        }
+
+        PaymentResult result = walletManager.putMoney(targetPlayer, currency, amount);
+        if (result == PaymentResult.SUCCESS) {
+            player.sendMessage(colorize("&aВыдано " + String.format("%,d", amount) + " " + currency + " игроку " + targetPlayer));
+
+            Player target = Bukkit.getPlayer(targetPlayer);
+            if (target != null) {
+                target.sendMessage(colorize("&aВы получили " + String.format("%,d", amount) + " " + currency + " от администратора"));
+            }
+
+            database.logTransaction("ADMIN:" + player.getName(), targetPlayer, currency, amount, "ADMIN_GIVE", "Admin give money");
+        } else {
+            player.sendMessage(colorize("&cОшибка при выдаче денег: " + result.name()));
         }
     }
 
     private void handleTakeMoney(Player player, String[] args) {
-        if (args.length < 4) {
+        if (!player.hasPermission("economy.admin.takemoney")) {
+            player.sendMessage(colorize("&cНет прав!"));
+            return;
+        }
+
+        if (args.length != 4) {
             player.sendMessage(colorize("&cИспользование: /ecoadmin takemoney <игрок> <валюта> <количество>"));
             return;
         }
 
-        String targetName = args[1];
+        String targetPlayer = args[1];
         String currency = args[2].toUpperCase();
+        int amount;
 
         try {
-            int amount = Integer.parseInt(args[3]);
-
-            if (amount <= 0) {
-                player.sendMessage(colorize("&cКоличество должно быть больше 0!"));
-                return;
-            }
-
-            WalletManager walletManager = Economy.getInstance().getWalletManager();
-
-            if (!walletManager.currencyExists(currency)) {
-                player.sendMessage(colorize("&cВалюта " + currency + " не существует!"));
-                return;
-            }
-
-            PaymentResult result = walletManager.getMoney(targetName, currency, amount);
-
-            if (result == PaymentResult.SUCCESS) {
-                player.sendMessage(colorize("&aЗабрано " + String.format("%,d", amount) + " " + currency + " у игрока " + targetName));
-                Player target = Bukkit.getPlayer(targetName);
-                if (target != null) {
-                    target.sendMessage(colorize("&cУ вас забрали " + String.format("%,d", amount) + " " + currency + " администратором!"));
-                }
-
-                // Логируем транзакцию
-                Database database = Economy.getInstance().getDatabase();
-                database.logTransaction(targetName, "SYSTEM", currency, amount, "ADMIN_TAKE", "Admin took " + currency);
-
-            } else {
-                player.sendMessage(colorize("&cОшибка при изъятии валюты: " + result.name()));
-            }
-
+            amount = Integer.parseInt(args[3]);
         } catch (NumberFormatException e) {
             player.sendMessage(colorize("&cНеверное количество!"));
+            return;
+        }
+
+        if (amount <= 0) {
+            player.sendMessage(colorize("&cКоличество должно быть больше 0!"));
+            return;
+        }
+
+        WalletManager walletManager = Economy.getInstance().getWalletManager();
+        Database database = Economy.getInstance().getDatabase();
+
+        if (!database.playerHasWallet(targetPlayer)) {
+            player.sendMessage(colorize("&cИгрок не найден!"));
+            return;
+        }
+
+        if (!walletManager.currencyExists(currency)) {
+            player.sendMessage(colorize("&cВалюта не существует!"));
+            return;
+        }
+
+        PaymentResult result = walletManager.getMoney(targetPlayer, currency, amount);
+        if (result == PaymentResult.SUCCESS) {
+            player.sendMessage(colorize("&aИзъято " + String.format("%,d", amount) + " " + currency + " у игрока " + targetPlayer));
+
+            Player target = Bukkit.getPlayer(targetPlayer);
+            if (target != null) {
+                target.sendMessage(colorize("&cУ вас изъято " + String.format("%,d", amount) + " " + currency + " администратором"));
+            }
+
+            database.logTransaction(targetPlayer, "ADMIN:" + player.getName(), currency, amount, "ADMIN_TAKE", "Admin take money");
+        } else {
+            player.sendMessage(colorize("&cОшибка при изъятии денег: " + result.name()));
+        }
+    }
+
+    private void handleGiveVil(Player player, String[] args) {
+        if (!player.hasPermission("economy.admin.premium")) {
+            player.sendMessage(colorize("&cНет прав!"));
+            return;
+        }
+
+        if (args.length != 3) {
+            player.sendMessage(colorize("&cИспользование: /ecoadmin givevil <игрок> <количество>"));
+            return;
+        }
+
+        String targetPlayer = args[1];
+        int amount;
+
+        try {
+            amount = Integer.parseInt(args[2]);
+        } catch (NumberFormatException e) {
+            player.sendMessage(colorize("&cНеверное количество!"));
+            return;
+        }
+
+        if (amount <= 0) {
+            player.sendMessage(colorize("&cКоличество должно быть больше 0!"));
+            return;
+        }
+
+        WalletManager walletManager = Economy.getInstance().getWalletManager();
+        Database database = Economy.getInstance().getDatabase();
+
+        if (!database.playerHasWallet(targetPlayer)) {
+            player.sendMessage(colorize("&cИгрок не найден!"));
+            return;
+        }
+
+        PaymentResult result = walletManager.putMoney(targetPlayer, "VIL", amount);
+        if (result == PaymentResult.SUCCESS) {
+            player.sendMessage(colorize("&aВыдано " + String.format("%,d", amount) + " VIL игроку " + targetPlayer));
+
+            Player target = Bukkit.getPlayer(targetPlayer);
+            if (target != null) {
+                target.sendMessage(colorize("&6Вы получили " + String.format("%,d", amount) + " VIL от администратора!"));
+            }
+
+            database.logTransaction("ADMIN:" + player.getName(), targetPlayer, "VIL", amount, "ADMIN_GIVE_VIL", "Admin give VIL");
+        } else {
+            player.sendMessage(colorize("&cОшибка при выдаче VIL: " + result.name()));
+        }
+    }
+
+    private void handleAddPremium(Player player, String[] args) {
+        if (!player.hasPermission("economy.admin.premium")) {
+            player.sendMessage(colorize("&cНет прав!"));
+            return;
+        }
+
+        if (args.length < 4) {
+            player.sendMessage(colorize("&cИспользование: /ecoadmin addpremium <название> <цена> <описание> [количество]"));
+            player.sendMessage(colorize("&7Предмет должен быть в руке!"));
+            return;
+        }
+
+        ItemStack itemInHand = player.getInventory().getItemInMainHand();
+        if (itemInHand == null || itemInHand.getType() == Material.AIR) {
+            player.sendMessage(colorize("&cВозьмите предмет в руку!"));
+            return;
+        }
+
+        String displayName = args[1];
+        long price;
+        int stock = -1;
+
+        try {
+            price = Long.parseLong(args[2]);
+        } catch (NumberFormatException e) {
+            player.sendMessage(colorize("&cНеверная цена!"));
+            return;
+        }
+
+        if (price <= 0) {
+            player.sendMessage(colorize("&cЦена должна быть больше 0!"));
+            return;
+        }
+
+        StringBuilder description = new StringBuilder();
+        int descStart = 3;
+        int descEnd = args.length;
+
+        if (args.length > 4) {
+            try {
+                stock = Integer.parseInt(args[args.length - 1]);
+                descEnd = args.length - 1;
+            } catch (NumberFormatException e) {
+                // Последний аргумент не число
+            }
+        }
+
+        for (int i = descStart; i < descEnd; i++) {
+            if (i > descStart) description.append(" ");
+            description.append(args[i]);
+        }
+
+        String itemData = serializeItem(itemInHand);
+        if (itemData == null) {
+            player.sendMessage(colorize("&cОшибка при сериализации предмета!"));
+            return;
+        }
+
+        Database database = Economy.getInstance().getDatabase();
+        int itemId = database.addPremiumShopItem(itemData, price, "PREMIUM", displayName, description.toString(), stock);
+
+        if (itemId > 0) {
+            player.sendMessage(colorize("&aПредмет добавлен в премиум магазин! ID: " + itemId));
+            player.sendMessage(colorize("&7Название: &f" + displayName));
+            player.sendMessage(colorize("&7Цена: &e" + String.format("%,d", price) + " VIL"));
+            player.sendMessage(colorize("&7Описание: &f" + description.toString()));
+            player.sendMessage(colorize("&7Количество: &f" + (stock == -1 ? "∞" : stock)));
+        } else {
+            player.sendMessage(colorize("&cОшибка при добавлении предмета!"));
+        }
+    }
+
+    private void handleRemovePremium(Player player, String[] args) {
+        if (!player.hasPermission("economy.admin.premium")) {
+            player.sendMessage(colorize("&cНет прав!"));
+            return;
+        }
+
+        if (args.length != 2) {
+            player.sendMessage(colorize("&cИспользование: /ecoadmin removepremium <id>"));
+            return;
+        }
+
+        int id;
+        try {
+            id = Integer.parseInt(args[1]);
+        } catch (NumberFormatException e) {
+            player.sendMessage(colorize("&cНеверный ID!"));
+            return;
+        }
+
+        Database database = Economy.getInstance().getDatabase();
+        if (database.removePremiumShopItem(id)) {
+            player.sendMessage(colorize("&aПредмет #" + id + " удален из премиум магазина!"));
+        } else {
+            player.sendMessage(colorize("&cПредмет не найден или ошибка при удалении!"));
+        }
+    }
+
+    private void handleListPremium(Player player) {
+        if (!player.hasPermission("economy.admin.premium")) {
+            player.sendMessage(colorize("&cНет прав!"));
+            return;
+        }
+
+        Database database = Economy.getInstance().getDatabase();
+        var items = database.getPremiumShopItems();
+
+        if (items.isEmpty()) {
+            player.sendMessage(colorize("&7Премиум магазин пуст"));
+            return;
+        }
+
+        player.sendMessage(colorize("&6=== Премиум магазин ==="));
+        for (var item : items) {
+            int id = (Integer) item.get("id");
+            String name = (String) item.get("display_name");
+            String description = (String) item.get("description");
+            long price = (Long) item.get("price");
+            int stock = (Integer) item.get("stock");
+
+            player.sendMessage(colorize("&7#" + id + " &f" + name));
+            player.sendMessage(colorize("  &7Цена: &e" + String.format("%,d", price) + " VIL"));
+            player.sendMessage(colorize("  &7Описание: &f" + description));
+            player.sendMessage(colorize("  &7Количество: &f" + (stock == -1 ? "∞" : stock)));
         }
     }
 
     private void handleReload(Player player) {
-        try {
-            Economy.getInstance().reloadConfig();
-            player.sendMessage(colorize("&aКонфигурация перезагружена!"));
-        } catch (Exception e) {
-            player.sendMessage(colorize("&cОшибка при перезагрузке: " + e.getMessage()));
+        if (!player.hasPermission("economy.admin.reload")) {
+            player.sendMessage(colorize("&cНет прав!"));
+            return;
         }
+
+        Economy.getInstance().reloadConfig();
+        player.sendMessage(colorize("&aКонфигурация перезагружена!"));
     }
 
     private void handleCleanup(Player player) {
-        try {
-            Database database = Economy.getInstance().getDatabase();
-            database.cleanupExpiredAuctions();
-            player.sendMessage(colorize("&aОчистка истекших аукционов выполнена!"));
-        } catch (Exception e) {
-            player.sendMessage(colorize("&cОшибка при очистке: " + e.getMessage()));
+        if (!player.hasPermission("economy.admin.cleanup")) {
+            player.sendMessage(colorize("&cНет прав!"));
+            return;
         }
+
+        Database database = Economy.getInstance().getDatabase();
+        database.cleanupExpiredAuctions();
+        player.sendMessage(colorize("&aОчистка истекших аукционов выполнена!"));
+
+        int daysToKeep = Economy.getInstance().getConfig().getInt("cleanup.transaction_days_to_keep", 30);
+        database.cleanupOldTransactions(daysToKeep);
+        player.sendMessage(colorize("&aОчистка старых транзакций выполнена!"));
     }
 
     private void handleStats(Player player) {
-        try {
-            Database database = Economy.getInstance().getDatabase();
-
-            player.sendMessage(colorize("&6=== Статистика Economy ==="));
-            player.sendMessage(colorize("&7Активных ордеров на бирже: &f" + database.getTotalOrdersCount()));
-            player.sendMessage(colorize("&7Предметов в премиум магазине: &f" + database.getPremiumShopItems().size()));
-
-            // Подсчитываем активные аукционы
-            int activeAuctions = database.getAuctionItems("ALL", null, 0, Integer.MAX_VALUE).size();
-            player.sendMessage(colorize("&7Активных лотов на аукционе: &f" + activeAuctions));
-
-        } catch (Exception e) {
-            player.sendMessage(colorize("&cОшибка при получении статистики: " + e.getMessage()));
+        if (!player.hasPermission("economy.admin")) {
+            player.sendMessage(colorize("&cНет прав!"));
+            return;
         }
+
+        Database database = Economy.getInstance().getDatabase();
+
+        player.sendMessage(colorize("&6=== Статистика Economy ==="));
+        player.sendMessage(colorize("&7Активных ордеров на бирже: &f" + database.getTotalOrdersCount()));
+        player.sendMessage(colorize("&7Предметов в премиум магазине: &f" + database.getPremiumShopItems().size()));
+
+        long expiredCleaned = database.getStatistic("expired_auctions_cleaned");
+        if (expiredCleaned > 0) {
+            player.sendMessage(colorize("&7Очищено истекших аукционов: &f" + expiredCleaned));
+        }
+
+        player.sendMessage(colorize("&7Системная валюта: &eVIL"));
+        player.sendMessage(colorize("&7Версия плагина: &f" + Economy.getInstance().getDescription().getVersion()));
+    }
+
+    private void showHelp(Player player) {
+        player.sendMessage(colorize("&6=== Админские команды Economy ==="));
+
+        if (player.hasPermission("economy.admin.givemoney")) {
+            player.sendMessage(colorize("&7/ecoadmin givemoney <игрок> <валюта> <количество> &f- выдать деньги"));
+        }
+
+        if (player.hasPermission("economy.admin.takemoney")) {
+            player.sendMessage(colorize("&7/ecoadmin takemoney <игрок> <валюта> <количество> &f- изъять деньги"));
+        }
+
+        if (player.hasPermission("economy.admin.premium")) {
+            player.sendMessage(colorize("&7/ecoadmin givevil <игрок> <количество> &f- выдать VIL"));
+            player.sendMessage(colorize("&7/ecoadmin addpremium <название> <цена> <описание> [кол-во] &f- добавить в премиум магазин"));
+            player.sendMessage(colorize("&7/ecoadmin removepremium <id> &f- удалить из премиум магазина"));
+            player.sendMessage(colorize("&7/ecoadmin listpremium &f- список премиум предметов"));
+        }
+
+        if (player.hasPermission("economy.admin.reload")) {
+            player.sendMessage(colorize("&7/ecoadmin reload &f- перезагрузить конфиг"));
+        }
+
+        if (player.hasPermission("economy.admin.cleanup")) {
+            player.sendMessage(colorize("&7/ecoadmin cleanup &f- очистить истекшие аукционы"));
+        }
+
+        player.sendMessage(colorize("&7/ecoadmin stats &f- статистика плагина"));
     }
 
     private String serializeItem(ItemStack item) {
@@ -323,34 +441,8 @@ public class AdminCommand implements Command {
             dataOutput.close();
             return Base64.getEncoder().encodeToString(outputStream.toByteArray());
         } catch (Exception e) {
-            // Fallback к простой сериализации
-            return item.getType().name() + ":" + item.getAmount() +
-                    (item.hasItemMeta() ? ":" + item.getItemMeta().toString() : "");
-        }
-    }
-
-    private String getItemCategory(Material material) {
-        String name = material.name();
-
-        if (name.contains("SWORD") || name.contains("AXE") || name.contains("BOW") ||
-                name.contains("TRIDENT") || name.contains("CROSSBOW") || name.contains("MACE")) {
-            return "COMBAT";
-        } else if (name.contains("PICKAXE") || name.contains("SHOVEL") || name.contains("HOE") ||
-                name.contains("SHEARS") || name.contains("FISHING_ROD")) {
-            return "TOOLS";
-        } else if (name.contains("HELMET") || name.contains("CHESTPLATE") ||
-                name.contains("LEGGINGS") || name.contains("BOOTS") || name.contains("SHIELD")) {
-            return "ARMOR";
-        } else if (material.isBlock()) {
-            return "BLOCKS";
-        } else if (material.isEdible()) {
-            return "FOOD";
-        } else if (name.contains("POTION") || name.contains("SPLASH") || name.contains("LINGERING")) {
-            return "POTIONS";
-        } else if (name.contains("ENCHANTED_BOOK") || name.contains("BOOK")) {
-            return "BOOKS";
-        } else {
-            return "MISC";
+            Economy.getInstance().getLogger().warning("Ошибка сериализации предмета: " + e.getMessage());
+            return null;
         }
     }
 

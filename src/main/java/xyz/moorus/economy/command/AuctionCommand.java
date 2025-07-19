@@ -87,7 +87,6 @@ public class AuctionCommand implements Command, Listener {
         int slot = 0;
         for (Map<String, Object> item : items) {
             if (slot >= itemsPerPage) break;
-
             ItemStack displayItem = createAuctionItemDisplay(item);
             auctionGui.setItem(slot++, displayItem);
         }
@@ -111,6 +110,7 @@ public class AuctionCommand implements Command, Listener {
         Inventory categoriesGui = Bukkit.createInventory(null, 27, colorize(title));
 
         ConfigurationSection categoriesConfig = Economy.getInstance().getConfig().getConfigurationSection("auction.categories");
+
         if (categoriesConfig != null) {
             int slot = 10;
             for (String categoryKey : categoriesConfig.getKeys(false)) {
@@ -136,8 +136,8 @@ public class AuctionCommand implements Command, Listener {
 
     private void openExpiredItemsMenu(Player player) {
         playerMenus.put(player.getName(), "expired");
-
         Database database = Economy.getInstance().getDatabase();
+
         List<Map<String, Object>> expiredItems = database.getExpiredAuctionItems(player.getName());
 
         String title = getConfigString("auction.gui.titles.expired", "&cИстекшие предметы");
@@ -146,7 +146,6 @@ public class AuctionCommand implements Command, Listener {
         int slot = 0;
         for (Map<String, Object> item : expiredItems) {
             if (slot >= 54) break;
-
             ItemStack displayItem = createExpiredItemDisplay(item);
             expiredGui.setItem(slot++, displayItem);
         }
@@ -160,8 +159,8 @@ public class AuctionCommand implements Command, Listener {
 
     private void openPremiumShop(Player player) {
         playerMenus.put(player.getName(), "premium");
-
         Database database = Economy.getInstance().getDatabase();
+
         List<Map<String, Object>> premiumItems = database.getPremiumShopItems();
 
         String title = getConfigString("auction.gui.titles.premium", "&6Премиум магазин");
@@ -170,7 +169,6 @@ public class AuctionCommand implements Command, Listener {
         int slot = 0;
         for (Map<String, Object> item : premiumItems) {
             if (slot >= 54) break;
-
             ItemStack displayItem = createPremiumItemDisplay(item);
             premiumGui.setItem(slot++, displayItem);
         }
@@ -272,7 +270,6 @@ public class AuctionCommand implements Command, Listener {
                 lore.add(colorize(line));
             }
             meta.setLore(lore);
-
             item.setItemMeta(meta);
         }
 
@@ -322,12 +319,13 @@ public class AuctionCommand implements Command, Listener {
                 lore.add(colorize(line));
             }
             meta.setLore(lore);
-
             button.setItemMeta(meta);
         }
 
         return button;
     }
+
+    // ==================== ОБРАБОТЧИКИ СОБЫТИЙ ====================
 
     @EventHandler
     public void onInventoryClick(InventoryClickEvent event) {
@@ -344,23 +342,31 @@ public class AuctionCommand implements Command, Listener {
             return; // Не наш инвентарь - не трогаем!
         }
 
+        // ИСПРАВЛЕНИЕ БАГА: ОТМЕНЯЕМ ВСЕ КЛИКИ В НАШИХ МЕНЮ
         event.setCancelled(true);
 
         ItemStack clickedItem = event.getCurrentItem();
         if (clickedItem == null || clickedItem.getType() == Material.AIR) return;
 
+        int slot = event.getSlot();
+
+        // Проверяем что клик в верхнем инвентаре (наше меню)
+        if (event.getClickedInventory() != event.getView().getTopInventory()) {
+            return; // Клик в инвентаре игрока - не обрабатываем
+        }
+
         switch (menuType) {
             case "auction":
-                handleAuctionClick(player, event.getSlot(), event.isLeftClick());
+                handleAuctionClick(player, slot, event.isLeftClick());
                 break;
             case "categories":
-                handleCategoryClick(player, event.getSlot());
+                handleCategoryClick(player, slot);
                 break;
             case "expired":
-                handleExpiredClick(player, event.getSlot());
+                handleExpiredClick(player, slot);
                 break;
             case "premium":
-                handlePremiumClick(player, event.getSlot());
+                handlePremiumClick(player, slot);
                 break;
         }
     }
@@ -383,7 +389,6 @@ public class AuctionCommand implements Command, Listener {
     private boolean isOurInventory(String title) {
         // Проверяем что это один из наших инвентарей
         String cleanTitle = title.replace("§", "&");
-
         return cleanTitle.contains("Аукцион") ||
                 cleanTitle.contains("Категории аукциона") ||
                 cleanTitle.contains("Истекшие предметы") ||
@@ -427,14 +432,15 @@ public class AuctionCommand implements Command, Listener {
     }
 
     private void handleCategoryClick(Player player, int slot) {
-        ConfigurationSection categoriesConfig = Economy.getInstance().getConfig().getConfigurationSection("auction.categories");
-        if (categoriesConfig == null) return;
-
-        if (slot == 22) {
+        if (slot == 22) { // Все категории
             openAuctionMenu(player, playerCurrency.get(player.getName()), "ALL", 0);
             return;
         }
 
+        ConfigurationSection categoriesConfig = Economy.getInstance().getConfig().getConfigurationSection("auction.categories");
+        if (categoriesConfig == null) return;
+
+        // ИСПРАВЛЕНО: Правильный маппинг слотов к категориям
         int categoryIndex = slot - 10;
         List<String> categories = new ArrayList<>(categoriesConfig.getKeys(false));
 
@@ -452,15 +458,14 @@ public class AuctionCommand implements Command, Listener {
 
         Map<String, Object> expiredItem = expiredItems.get(slot);
         int itemId = (Integer) expiredItem.get("id");
-
         ItemStack originalItem = deserializeItem((String) expiredItem.get("item_data"));
+
         if (originalItem != null) {
             player.getInventory().addItem(originalItem);
             database.removeExpiredAuctionItem(itemId);
 
             String message = getConfigString("messages.auction.item_returned", "&aПредмет возвращен в ваш инвентарь!");
             player.sendMessage(colorize(message));
-
             openExpiredItemsMenu(player);
         }
     }
@@ -470,6 +475,7 @@ public class AuctionCommand implements Command, Listener {
         WalletManager walletManager = Economy.getInstance().getWalletManager();
 
         List<Map<String, Object>> premiumItems = database.getPremiumShopItems();
+
         if (slot >= premiumItems.size()) return;
 
         Map<String, Object> premiumItem = premiumItems.get(slot);
@@ -492,7 +498,6 @@ public class AuctionCommand implements Command, Listener {
                         .replace("{price}", String.valueOf(price))
                         .replace("{currency}", "VIL");
                 player.sendMessage(colorize(message));
-
                 openPremiumShop(player);
             }
         }
@@ -505,8 +510,8 @@ public class AuctionCommand implements Command, Listener {
         String currency = playerCurrency.get(player.getName());
         String category = playerCategory.get(player.getName());
         int page = playerPages.getOrDefault(player.getName(), 0);
-
         int itemsPerPage = Economy.getInstance().getConfig().getInt("auction.gui.size", 54) - 9;
+
         List<Map<String, Object>> items = database.getAuctionItems(category, currency, page, itemsPerPage);
 
         if (slot >= items.size()) {
@@ -547,7 +552,6 @@ public class AuctionCommand implements Command, Listener {
             }
 
             database.markAuctionItemSold(itemId);
-
             database.logTransaction(player.getName(), sellerName, itemCurrency, price,
                     "AUCTION_BUY", "Auction purchase: item #" + itemId);
 
@@ -565,7 +569,6 @@ public class AuctionCommand implements Command, Listener {
             }
 
             openAuctionMenu(player, currency, category, page);
-
         } else {
             player.sendMessage(colorize("&cОшибка при покупке: " + result.name()));
         }
@@ -577,8 +580,8 @@ public class AuctionCommand implements Command, Listener {
         String currency = playerCurrency.get(player.getName());
         String category = playerCategory.get(player.getName());
         int page = playerPages.getOrDefault(player.getName(), 0);
-
         int itemsPerPage = Economy.getInstance().getConfig().getInt("auction.gui.size", 54) - 9;
+
         List<Map<String, Object>> items = database.getAuctionItems(category, currency, page, itemsPerPage);
 
         if (slot >= items.size()) return;
