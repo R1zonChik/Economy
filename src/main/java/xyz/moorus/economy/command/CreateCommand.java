@@ -3,8 +3,8 @@ package xyz.moorus.economy.command;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import xyz.moorus.economy.main.Economy;
-import xyz.moorus.economy.money.CreateResult;
 import xyz.moorus.economy.money.WalletManager;
+import xyz.moorus.economy.money.PaymentResult;
 import xyz.moorus.economy.sql.Database;
 
 public class CreateCommand implements Command {
@@ -111,40 +111,53 @@ public class CreateCommand implements Command {
         }
 
         // Создаем валюту
-        CreateResult result = walletManager.createCurrency(factionId, sender, currencyCode, emission);
+        boolean success = walletManager.createCurrency(currencyCode, factionId, (long)emission);
 
-        switch (result) {
-            case SUCCESS:
+        if (success) {
+            // Выдаем валюту создателю
+            PaymentResult paymentResult = walletManager.putMoney(player.getName(), currencyCode, emission);
+
+            if (paymentResult == PaymentResult.SUCCESS) {
+                // Обновляем эмиссию в базе данных
+                database.updateCurrencyEmission(currencyCode, emission);
+
+                // Логируем создание валюты
+                database.logTransaction(null, player.getName(), currencyCode, emission,
+                        "CURRENCY_CREATE", "Currency " + currencyCode + " created by " + player.getName());
+
                 String successMessage = Economy.getInstance().getConfig().getString("messages.currency_created", "&aВалюта создана успешно!");
                 player.sendMessage(colorize(successMessage.replace("{currency}", currencyCode)));
                 player.sendMessage(colorize("&7Код валюты: &f" + currencyCode));
                 player.sendMessage(colorize("&7Лимит эмиссии: &f" + String.format("%,d", emission)));
                 player.sendMessage(colorize("&7Вы получили " + String.format("%,d", emission) + " " + currencyCode + " в свой кошелек"));
-                break;
 
-            case WRONG_NAME:
+                // Показываем информацию о фракции
+                String factionName = database.getFactionName(factionId);
+                if (factionName != null) {
+                    player.sendMessage(colorize("&7Фракция: &f" + factionName));
+                }
+
+                player.sendMessage(colorize("&7Используйте &f/emit " + currencyCode + " <количество> &7для дополнительного выпуска валюты"));
+
+            } else {
+                player.sendMessage(colorize("&cОшибка при выдаче валюты: " + paymentResult.name()));
+            }
+
+        } else {
+            // Определяем причину ошибки
+            if (walletManager.currencyExists(currencyCode)) {
+                String existsMessage = Economy.getInstance().getConfig().getString("messages.currency_exists", "&cТакая валюта уже существует!");
+                player.sendMessage(colorize(existsMessage));
+            } else if (!walletManager.isCurrencyCorrect(currencyCode)) {
                 player.sendMessage(colorize("&cНеверное название валюты!"));
                 player.sendMessage(colorize("&7Используйте 3 заглавные латинские буквы"));
                 player.sendMessage(colorize("&7Избегайте зарезервированных валют"));
-                break;
-
-            case WRONG_AMOUNT:
-                player.sendMessage(colorize("&cНеверная сумма эмиссии!"));
-                player.sendMessage(colorize("&7Должна быть от 10,000 до 1,000,000,000"));
-                break;
-
-            case ALREADY_EXISTS:
-                String existsMessage = Economy.getInstance().getConfig().getString("messages.currency_exists", "&cТакая валюта уже существует!");
-                player.sendMessage(colorize(existsMessage));
-                break;
-
-            case FACTION_ALREADY_HAS_CURRENCY:
+            } else if (database.factionHasCurrency(factionId)) {
                 player.sendMessage(colorize("&cВаша фракция уже имеет валюту!"));
-                break;
-
-            default:
-                player.sendMessage(colorize("&cНеизвестная ошибка: " + result.name()));
-                break;
+            } else {
+                player.sendMessage(colorize("&cОшибка при создании валюты!"));
+                player.sendMessage(colorize("&7Проверьте правильность введенных данных"));
+            }
         }
     }
 

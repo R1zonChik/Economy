@@ -268,6 +268,19 @@ public class Database {
         }
     }
 
+    public String getFactionCurrency(String factionId) {
+        try (Connection connection = getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "SELECT currency_name FROM currencies WHERE faction_id = ?")) {
+            statement.setString(1, factionId);
+            ResultSet rs = statement.executeQuery();
+            return rs.next() ? rs.getString("currency_name") : null;
+        } catch (SQLException e) {
+            plugin.getLogger().severe("Ошибка при получении валюты фракции: " + e.getMessage());
+            return null;
+        }
+    }
+
     // ==================== МЕТОДЫ ДЛЯ ИГРОКОВ ====================
 
     public boolean playerHasWallet(String nickname) {
@@ -351,6 +364,25 @@ public class Database {
             plugin.getLogger().severe("Ошибка при получении кошелька: " + e.getMessage());
             return new PlayerWallet(nickname);
         }
+    }
+
+    // ==================== МЕТОДЫ ДЛЯ СОВМЕСТИМОСТИ С НОВЫМ WALLETMANAGER ====================
+
+    public PlayerWallet loadPlayerWallet(String playerName) {
+        return getPlayerWallet(playerName);
+    }
+
+    public void savePlayerWallet(PlayerWallet wallet) {
+        setPlayerWallet(wallet.getPlayerName(), wallet);
+    }
+
+    public boolean currencyExists(String currency) {
+        return doesCurrencyExist(currency);
+    }
+
+    public boolean createCurrency(String currency, String factionId, long maxEmission) {
+        addCurrency(currency, factionId, 0, maxEmission);
+        return true;
     }
 
     // ==================== МЕТОДЫ ДЛЯ ВАЛЮТ ====================
@@ -1004,6 +1036,36 @@ public class Database {
         } catch (SQLException e) {
             plugin.getLogger().severe("Ошибка при очистке транзакций: " + e.getMessage());
         }
+    }
+
+    public List<String> getAllPlayerNames() {
+        List<String> names = new ArrayList<>();
+        try (Connection connection = getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "SELECT DISTINCT player_name FROM players ORDER BY player_name LIMIT 50")) {
+            ResultSet rs = statement.executeQuery();
+            while (rs.next()) {
+                names.add(rs.getString("player_name"));
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().severe("Ошибка при получении имен игроков: " + e.getMessage());
+        }
+        return names;
+    }
+
+    public List<String> getAllCurrencies() {
+        List<String> currencies = new ArrayList<>();
+        try (Connection connection = getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "SELECT DISTINCT currency_name FROM currencies ORDER BY currency_name")) {
+            ResultSet rs = statement.executeQuery();
+            while (rs.next()) {
+                currencies.add(rs.getString("currency_name"));
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().severe("Ошибка при получении валют: " + e.getMessage());
+        }
+        return currencies;
     }
 
     public void close() {

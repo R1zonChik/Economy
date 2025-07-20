@@ -2,211 +2,243 @@ package xyz.moorus.economy.money;
 
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.Listener;
-import org.bukkit.event.player.PlayerJoinEvent;
+import xyz.moorus.economy.main.Economy;
 import xyz.moorus.economy.sql.Database;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
-import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
-public class WalletManager implements Listener {
+public class WalletManager {
 
-    private Database database;
+    private final Economy plugin;
+    private final Database database;
+    private final Map<String, PlayerWallet> wallets;
 
-    public WalletManager(Database database) {
-        this.database = database;
+    public WalletManager(Economy plugin) {
+        this.plugin = plugin;
+        this.database = plugin.getDatabase();
+        this.wallets = new ConcurrentHashMap<>();
     }
 
-    @EventHandler
-    public void onJoin(PlayerJoinEvent e) {
-        String nickname = e.getPlayer().getName();
-        String uuid = e.getPlayer().getUniqueId().toString();
-
-        // Асинхронно проверяем и создаем кошелек
-        Bukkit.getScheduler().runTaskAsynchronously(e.getPlayer().getServer().getPluginManager().getPlugin("Economy"), () -> {
-            if (!database.playerHasWallet(nickname)) {
-                database.createPlayer(nickname, uuid);
-                PlayerWallet wallet = new PlayerWallet(nickname);
-                wallet.putCurrency("VIL", 100); // Стартовый баланс
-                database.setPlayerWallet(nickname, wallet);
+    public PlayerWallet getPlayerWallet(String playerName) {
+        return wallets.computeIfAbsent(playerName, name -> {
+            PlayerWallet wallet = database.getPlayerWallet(name);
+            if (wallet == null || wallet.getSlots().isEmpty()) {
+                wallet = new PlayerWallet(name);
+                // Добавляем стартовый баланс VIL
+                int startingVil = plugin.getConfig().getInt("currencies.starting_vil_balance", 100);
+                wallet.getSlots().put("VIL", startingVil);
+                database.setPlayerWallet(name, wallet);
             }
+            return wallet;
         });
     }
 
-    public PlayerWallet getPlayerWallet(String nickname) {
-        return database.getPlayerWallet(nickname);
+    public PaymentResult putMoney(String playerName, String currency, int amount) {
+        if (!currencyExists(currency)) {
+            return PaymentResult.WRONG_CURRENCY;
+        }
+
+        if (amount <= 0) {
+            return PaymentResult.WRONG_AMOUNT;
+        }
+
+        if (amount > 1000000000) {
+            return PaymentResult.WRONG_AMOUNT;
+        }
+
+        PlayerWallet wallet = getPlayerWallet(playerName);
+        int currentAmount = wallet.getSlots().getOrDefault(currency, 0);
+
+        // Проверяем переполнение
+        if (currentAmount > Integer.MAX_VALUE - amount) {
+            return PaymentResult.WRONG_AMOUNT;
+        }
+
+        wallet.getSlots().put(currency, currentAmount + amount);
+        database.setPlayerWallet(playerName, wallet);
+
+        return PaymentResult.SUCCESS;
     }
 
-    public PaymentResult pay(String payingPlayerNick, String recipientPlayerNick, String currency, int amount) {
-        if (!database.doesCurrencyExist(currency)) return PaymentResult.WRONG_CURRENCY;
-        if (!database.playerHasWallet(recipientPlayerNick) || payingPlayerNick.equals(recipientPlayerNick)) return PaymentResult.WRONG_RECIPIENT;
-        if (amount <= 0) return PaymentResult.WRONG_AMOUNT;
+    public PaymentResult getMoney(String playerName, String currency, int amount) {
+        if (!currencyExists(currency)) {
+            return PaymentResult.WRONG_CURRENCY;
+        }
 
-        PlayerWallet payer = database.getPlayerWallet(payingPlayerNick);
-        PlayerWallet recipient = database.getPlayerWallet(recipientPlayerNick);
+        if (amount <= 0) {
+            return PaymentResult.WRONG_AMOUNT;
+        }
 
-        if (payer.getCurrencyAmount(currency) < amount) return PaymentResult.NOT_ENOUGH_MONEY;
+        PlayerWallet wallet = getPlayerWallet(playerName);
+        int currentAmount = wallet.getSlots().getOrDefault(currency, 0);
 
-        payer.getCurrency(currency, amount);
-        database.setPlayerWallet(payer.getNickname(), payer);
+        if (currentAmount < amount) {
+            return PaymentResult.NOT_ENOUGH_MONEY;
+        }
 
-        recipient.putCurrency(currency, amount);
-        database.setPlayerWallet(recipient.getNickname(), recipient);
+        wallet.getSlots().put(currency, currentAmount - amount);
+        database.setPlayerWallet(playerName, wallet);
+
+        return PaymentResult.SUCCESS;
+    }
+
+    public PaymentResult pay(String fromPlayer, String toPlayer, String currency, int amount) {
+        if (!currencyExists(currency)) {
+            return PaymentResult.WRONG_CURRENCY;
+        }
+
+        if (amount <= 0) {
+            return PaymentResult.WRONG_AMOUNT;
+        }
+
+        if (amount > 1000000000) {
+            return PaymentResult.WRONG_AMOUNT;
+        }
+
+        if (!database.playerHasWallet(toPlayer)) {
+            return PaymentResult.WRONG_RECIPIENT;
+        }
+
+        PlayerWallet fromWallet = getPlayerWallet(fromPlayer);
+        if (fromWallet.getSlots().getOrDefault(currency, 0) < amount) {
+            return PaymentResult.NOT_ENOUGH_MONEY;
+        }
+
+        // Выполняем перевод
+        PaymentResult takeResult = getMoney(fromPlayer, currency, amount);
+        if (takeResult != PaymentResult.SUCCESS) {
+            return takeResult;
+        }
+
+        PaymentResult giveResult = putMoney(toPlayer, currency, amount);
+        if (giveResult != PaymentResult.SUCCESS) {
+            // Возвращаем деньги если не удалось перевести
+            putMoney(fromPlayer, currency, amount);
+            return giveResult;
+        }
 
         // Логируем транзакцию
-        database.logTransaction(payingPlayerNick, recipientPlayerNick, currency, amount, "TRANSFER", "Player transfer");
+        database.logTransaction(fromPlayer, toPlayer, currency, amount,
+                "PLAYER_TRANSFER", "Transfer from " + fromPlayer + " to " + toPlayer);
 
         return PaymentResult.SUCCESS;
-    }
-
-    public PaymentResult putMoney(String playerNick, String currency, int amount) {
-        if (!database.doesCurrencyExist(currency)) return PaymentResult.WRONG_CURRENCY;
-        if (!database.playerHasWallet(playerNick)) return PaymentResult.WRONG_RECIPIENT;
-        if (amount <= 0) return PaymentResult.WRONG_AMOUNT;
-
-        PlayerWallet recipient = database.getPlayerWallet(playerNick);
-        recipient.putCurrency(currency, amount);
-        database.setPlayerWallet(recipient.getNickname(), recipient);
-
-        return PaymentResult.SUCCESS;
-    }
-
-    public PaymentResult getMoney(String payerNick, String currency, int amount) {
-        if (!database.doesCurrencyExist(currency)) return PaymentResult.WRONG_CURRENCY;
-        if (!database.playerHasWallet(payerNick)) return PaymentResult.WRONG_RECIPIENT;
-        if (amount <= 0) return PaymentResult.WRONG_AMOUNT;
-
-        PlayerWallet payer = database.getPlayerWallet(payerNick);
-
-        if (payer.getCurrencyAmount(currency) < amount) return PaymentResult.NOT_ENOUGH_MONEY;
-
-        payer.getCurrency(currency, amount);
-        database.setPlayerWallet(payer.getNickname(), payer);
-
-        return PaymentResult.SUCCESS;
-    }
-
-    public CreateResult createCurrency(String factionId, String creatorName, String currencyName, int amount) {
-        if (!isCurrencyCorrect(currencyName)) return CreateResult.WRONG_NAME;
-        if (amount < 10000 || amount > 1000000000) return CreateResult.WRONG_AMOUNT;
-        if (database.factionHasCurrency(factionId)) return CreateResult.FACTION_ALREADY_HAS_CURRENCY;
-
-        if (!database.doesCurrencyExist(currencyName)) {
-            database.addCurrency(currencyName, factionId, (long) amount, (long) amount * 2);
-            PlayerWallet wallet = database.getPlayerWallet(creatorName);
-            wallet.putCurrency(currencyName, amount);
-            database.setPlayerWallet(creatorName, wallet);
-            return CreateResult.SUCCESS;
-        } else {
-            return CreateResult.ALREADY_EXISTS;
-        }
-    }
-
-    public boolean emitCurrency(String emitterName, String currencyName, int amount) {
-        long currentAmount = database.getCurrencyEmission(currencyName);
-        long maxEmission = database.getCurrencyMaxEmission(currencyName);
-
-        if (currentAmount + amount > maxEmission) return false;
-
-        // Обновляем эмиссию
-        if (database.updateCurrencyEmission(currencyName, currentAmount + amount)) {
-            // Добавляем валюту эмитенту
-            PlayerWallet wallet = database.getPlayerWallet(emitterName);
-            wallet.putCurrency(currencyName, amount);
-            database.setPlayerWallet(emitterName, wallet);
-
-            // Логируем эмиссию
-            database.logTransaction(null, emitterName, currencyName, amount, "EMISSION", "Currency emission");
-            return true;
-        }
-
-        return false;
-    }
-
-    public boolean isCurrencyCorrect(String currency) {
-        if (currency == null || currency.length() != 3) {
-            return false;
-        }
-
-        // Проверяем что все символы - заглавные латинские буквы
-        for (char c : currency.toCharArray()) {
-            if (c < 'A' || c > 'Z') {
-                return false;
-            }
-        }
-
-        // Проверяем что это не зарезервированные комбинации (кроме VIL)
-        String[] reserved = {"USD", "EUR", "RUB", "GBP", "JPY", "CHF", "CAD", "AUD"};
-        for (String res : reserved) {
-            if (currency.equals(res)) {
-                return false; // ВСЕ зарезервированные валюты запрещены для создания
-            }
-        }
-
-        // VIL может создавать только система
-        if (currency.equals("VIL")) {
-            return false;
-        }
-
-        return true;
     }
 
     public boolean currencyExists(String currency) {
         return database.doesCurrencyExist(currency);
     }
 
+    public boolean createCurrency(String currency, String factionId, long maxEmission) {
+        if (!isCurrencyCorrect(currency)) {
+            return false;
+        }
+
+        if (currencyExists(currency)) {
+            return false;
+        }
+
+        database.addCurrency(currency, factionId, 0, maxEmission);
+        return true;
+    }
+
+    public boolean isCurrencyCorrect(String currency) {
+        if (currency == null || currency.isEmpty()) {
+            return false;
+        }
+
+        // Проверяем что это от 3 до 4 заглавных латинских букв
+        if (!currency.matches("^[A-Z]{3,4}$")) {
+            return false;
+        }
+
+        // Проверяем что не зарезервированная валюта
+        List<String> reserved = plugin.getConfig().getStringList("currencies.reserved");
+        if (reserved.contains(currency)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    public String getCurrencyValidationError(String currency) {
+        if (currency == null || currency.isEmpty()) {
+            return plugin.getConfig().getString("messages.currency.invalid_name", "&cНеверное название валюты!");
+        }
+
+        if (currency.length() < 3 || currency.length() > 4) {
+            return plugin.getConfig().getString("messages.currency.wrong_length", "&cНазвание валюты должно содержать 3-4 символа!");
+        }
+
+        if (!currency.matches("^[A-Z]{3,4}$")) {
+            return plugin.getConfig().getString("messages.currency.only_latin_uppercase", "&cИспользуйте только заглавные латинские буквы!");
+        }
+
+        List<String> reserved = plugin.getConfig().getStringList("currencies.reserved");
+        if (reserved.contains(currency)) {
+            return plugin.getConfig().getString("messages.currency.reserved_currency", "&cЭта валюта зарезервирована!");
+        }
+
+        return null; // Валюта корректна
+    }
+
     public boolean canEmitCurrency(String currency, int amount) {
         long currentEmission = database.getCurrencyEmission(currency);
         long maxEmission = database.getCurrencyMaxEmission(currency);
-        return (currentEmission + amount) <= maxEmission;
+
+        return currentEmission + amount <= maxEmission;
     }
 
-    // Методы для PlaceholderAPI
-    public double getBalance(UUID playerUuid, String currency) {
-        Player player = Bukkit.getPlayer(playerUuid);
-        if (player == null) return 0.0;
-
-        PlayerWallet wallet = getPlayerWallet(player.getName());
-        return wallet.getCurrencyAmount(currency);
+    public long getCurrencyEmission(String currency) {
+        return database.getCurrencyEmission(currency);
     }
 
-    public Map<String, Double> getWallet(UUID playerUuid) {
-        Player player = Bukkit.getPlayer(playerUuid);
-        if (player == null) return new HashMap<>();
-
-        PlayerWallet wallet = getPlayerWallet(player.getName());
-        TreeMap<String, Integer> slots = wallet.getSlots();
-
-        Map<String, Double> result = new HashMap<>();
-        for (Map.Entry<String, Integer> entry : slots.entrySet()) {
-            result.put(entry.getKey(), entry.getValue().doubleValue());
-        }
-
-        return result;
+    public long getMaxCurrencyEmission(String currency) {
+        return database.getCurrencyMaxEmission(currency);
     }
 
-    public boolean transferMoney(UUID fromUuid, UUID toUuid, String currency, double amount) {
-        Player fromPlayer = Bukkit.getPlayer(fromUuid);
-        Player toPlayer = Bukkit.getPlayer(toUuid);
+    // Методы для совместимости с существующим кодом
+    public int getBalance(java.util.UUID uuid, String currency) {
+        String playerName = org.bukkit.Bukkit.getOfflinePlayer(uuid).getName();
+        if (playerName == null) return 0;
 
-        if (fromPlayer == null || toPlayer == null) return false;
-
-        PaymentResult result = pay(fromPlayer.getName(), toPlayer.getName(), currency, (int) amount);
-        return result == PaymentResult.SUCCESS;
+        PlayerWallet wallet = getPlayerWallet(playerName);
+        return wallet.getSlots().getOrDefault(currency, 0);
     }
 
-    public boolean addMoney(UUID playerUuid, String currency, double amount) {
-        Player player = Bukkit.getPlayer(playerUuid);
-        if (player == null) return false;
+    public PlayerWallet getWallet(java.util.UUID uuid) {
+        String playerName = org.bukkit.Bukkit.getOfflinePlayer(uuid).getName();
+        if (playerName == null) return new PlayerWallet("Unknown");
 
-        PaymentResult result = putMoney(player.getName(), currency, (int) amount);
-        return result == PaymentResult.SUCCESS;
+        return getPlayerWallet(playerName);
+    }
+
+    public List<String> getAllCurrencies() {
+        return database.getAllCurrencies();
     }
 
     public Database getDatabase() {
         return database;
+    }
+
+    public void saveAllWallets() {
+        for (PlayerWallet wallet : wallets.values()) {
+            database.setPlayerWallet(wallet.getPlayerName(), wallet);
+        }
+    }
+
+    public void loadPlayerWallet(String playerName) {
+        if (!wallets.containsKey(playerName)) {
+            getPlayerWallet(playerName); // Это загрузит кошелек
+        }
+    }
+
+    public void unloadPlayerWallet(String playerName) {
+        PlayerWallet wallet = wallets.remove(playerName);
+        if (wallet != null) {
+            database.setPlayerWallet(playerName, wallet);
+        }
     }
 }

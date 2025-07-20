@@ -77,8 +77,7 @@ public class EmitCommand implements Command {
             database.updateCurrencyEmission(currency, currentEmission + amount);
 
             // Логируем транзакцию
-            database.logTransaction("EMISSION", player.getName(), currency, amount,
-                    "CURRENCY_EMISSION", "Currency emission by " + player.getName());
+            database.logTransaction(null, player.getName(), currency, amount, "CURRENCY_EMISSION", "Currency emission by " + player.getName());
 
             player.sendMessage(colorize("&aУспешно выпущено " + String.format("%,d", amount) + " " + currency + "!"));
             player.sendMessage(colorize("&7Новая эмиссия: &f" + String.format("%,d", currentEmission + amount) + " " + currency));

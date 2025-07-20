@@ -208,3 +208,7 @@ permissions:
   economy.currency.transfer:
     description: Переводы валют
     default: true
+
+  economy.admin.emit:
+    description: Эмиссия системной валюты VIL
+    default: op

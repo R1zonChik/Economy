@@ -12,5 +12,9 @@ public class PlayerWallet extends Wallet {
 
     public String getNickname() {return nickname;}
     public TreeMap<String, Integer> getSlots() {return this.currencies;}
+    // В класс PlayerWallet добавь этот метод:
+    public String getPlayerName() {
+        return this.nickname;
+    }
 
 }

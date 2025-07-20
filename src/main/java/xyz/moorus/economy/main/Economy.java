@@ -1,8 +1,7 @@
 package xyz.moorus.economy.main;
 
-import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
-import xyz.moorus.economy.executor.Executor;
+import xyz.moorus.economy.command.*;
 import xyz.moorus.economy.money.WalletManager;
 import xyz.moorus.economy.sql.Database;
 
@@ -18,52 +17,66 @@ public final class Economy extends JavaPlugin {
     public void onEnable() {
         instance = this;
 
-        getLogger().info("Создание конфигурационного файла...");
+        // Сохраняем конфиг по умолчанию
         saveDefaultConfig();
 
-        getLogger().info("Economy плагин загружается асинхронно...");
+        try {
+            // Инициализируем базу данных
+            database = new Database(this);
 
-        Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
-            try {
-                getLogger().info("Подключение к базе данных...");
-                database = new Database(this);
+            // Инициализируем менеджер кошельков
+            walletManager = new WalletManager(this);
 
-                walletManager = new WalletManager(database);
+            // Регистрируем команды
+            registerCommands();
 
-                Bukkit.getScheduler().runTask(this, () -> {
-                    registerCommands();
-                    getLogger().info("Economy плагин полностью загружен!");
-                });
+            getLogger().info("Economy плагин успешно запущен!");
 
-            } catch (SQLException e) {
-                getLogger().severe("Ошибка подключения к базе данных: " + e.getMessage());
-                e.printStackTrace();
-                Bukkit.getPluginManager().disablePlugin(this);
-            }
-        });
+        } catch (SQLException e) {
+            getLogger().severe("Ошибка при подключении к базе данных: " + e.getMessage());
+            getServer().getPluginManager().disablePlugin(this);
+        }
     }
 
     @Override
     public void onDisable() {
+        if (walletManager != null) {
+            walletManager.saveAllWallets();
+        }
+
         if (database != null) {
             database.close();
         }
+
         getLogger().info("Economy плагин отключен!");
     }
 
     private void registerCommands() {
-        Executor executor = new Executor(walletManager);
+        // Регистрируем команды через твою систему Command Manager
+        CommandManager commandManager = new CommandManager();
 
-        getCommand("pw").setExecutor(executor);
-        getCommand("pay").setExecutor(executor);
-        getCommand("cc").setExecutor(executor);
-        getCommand("bourse").setExecutor(executor);
-        getCommand("emit").setExecutor(executor);
-        getCommand("ah").setExecutor(executor);
-        getCommand("sellhand").setExecutor(executor);
-        getCommand("ecoadmin").setExecutor(executor);
+        // Регистрируем твои команды
+        commandManager.registerCommand(new PayCommand());
+        commandManager.registerCommand(new WalletCommand());
+        commandManager.registerCommand(new CreateCommand());
+        commandManager.registerCommand(new BourseCommand());
+        commandManager.registerCommand(new EmitCommand());
+        commandManager.registerCommand(new AuctionCommand());
+        commandManager.registerCommand(new SellHandCommand());
+        commandManager.registerCommand(new AdminCommand());
 
-        getLogger().info("Команды зарегистрированы!");
+        AdminCommand adminCommand = new AdminCommand();
+        commandManager.registerCommand(adminCommand);
+        // Регистрируем CommandManager как executor для всех команд
+        getCommand("pay").setExecutor(commandManager);
+        getCommand("pw").setExecutor(commandManager);
+        getCommand("cc").setExecutor(commandManager);
+        getCommand("ecoadmin").setTabCompleter(adminCommand);
+        getCommand("bourse").setExecutor(commandManager);
+        getCommand("emit").setExecutor(commandManager);
+        getCommand("ah").setExecutor(commandManager);
+        getCommand("sellhand").setExecutor(commandManager);
+        getCommand("ecoadmin").setExecutor(commandManager);
     }
 
     public static Economy getInstance() {

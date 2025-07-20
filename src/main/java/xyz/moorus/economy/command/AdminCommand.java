@@ -2,18 +2,22 @@ package xyz.moorus.economy.command;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
+import org.bukkit.OfflinePlayer;
+import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.util.io.BukkitObjectOutputStream;
 import xyz.moorus.economy.main.Economy;
 import xyz.moorus.economy.money.PaymentResult;
+import xyz.moorus.economy.money.PlayerWallet;
 import xyz.moorus.economy.money.WalletManager;
 import xyz.moorus.economy.sql.Database;
 
 import java.io.ByteArrayOutputStream;
-import java.util.Base64;
+import java.util.*;
+import java.util.stream.Collectors;
 
-public class AdminCommand implements Command {
+public class AdminCommand implements Command, TabCompleter {
 
     @Override
     public String getName() {
@@ -56,6 +60,10 @@ public class AdminCommand implements Command {
             case "listpremium":
                 handleListPremium(player);
                 break;
+            case "wallet":
+            case "кошелек":
+                handleWallet(player, args);
+                break;
             case "reload":
                 handleReload(player);
                 break;
@@ -69,6 +77,127 @@ public class AdminCommand implements Command {
                 showHelp(player);
                 break;
         }
+    }
+
+    @Override
+    public List<String> onTabComplete(org.bukkit.command.CommandSender sender, org.bukkit.command.Command command, String alias, String[] args) {
+        if (!(sender instanceof Player)) return new ArrayList<>();
+        Player player = (Player) sender;
+
+        if (!player.hasPermission("economy.admin")) {
+            return new ArrayList<>();
+        }
+
+        List<String> completions = new ArrayList<>();
+
+        if (args.length == 1) {
+            // Первый аргумент - подкоманды
+            List<String> subcommands = Arrays.asList(
+                    "givemoney", "takemoney", "givevil", "wallet",
+                    "addpremium", "removepremium", "listpremium",
+                    "reload", "cleanup", "stats"
+            );
+
+            return subcommands.stream()
+                    .filter(sub -> sub.toLowerCase().startsWith(args[0].toLowerCase()))
+                    .collect(Collectors.toList());
+        }
+
+        String subcommand = args[0].toLowerCase();
+
+        switch (subcommand) {
+            case "givemoney":
+            case "takemoney":
+                if (args.length == 2) {
+                    // Второй аргумент - игроки
+                    return getOnlinePlayerNames(args[1]);
+                } else if (args.length == 3) {
+                    // Третий аргумент - валюты
+                    return getAvailableCurrencies(args[2]);
+                } else if (args.length == 4) {
+                    // Четвертый аргумент - количество (примеры)
+                    return Arrays.asList("100", "1000", "10000", "100000");
+                }
+                break;
+
+            case "givevil":
+                if (args.length == 2) {
+                    return getOnlinePlayerNames(args[1]);
+                } else if (args.length == 3) {
+                    return Arrays.asList("100", "1000", "5000", "10000");
+                }
+                break;
+
+            case "wallet":
+                if (args.length == 2) {
+                    return getAllPlayerNames(args[1]);
+                }
+                break;
+
+            case "addpremium":
+                if (args.length == 2) {
+                    return Arrays.asList("<название>", "Меч_Героя", "Зелье_Силы", "Редкий_Блок");
+                } else if (args.length == 3) {
+                    return Arrays.asList("100", "500", "1000", "5000", "10000");
+                } else if (args.length == 4) {
+                    return Arrays.asList("<описание>", "Мощное_оружие", "Полезное_зелье", "Строительный_материал");
+                } else if (args.length == 5) {
+                    return Arrays.asList("1", "5", "10", "50", "-1");
+                }
+                break;
+
+            case "removepremium":
+                if (args.length == 2) {
+                    return getPremiumItemIds(args[1]);
+                }
+                break;
+        }
+
+        return completions;
+    }
+
+    private List<String> getOnlinePlayerNames(String partial) {
+        return Bukkit.getOnlinePlayers().stream()
+                .map(Player::getName)
+                .filter(name -> name.toLowerCase().startsWith(partial.toLowerCase()))
+                .collect(Collectors.toList());
+    }
+
+    private List<String> getAllPlayerNames(String partial) {
+        List<String> names = new ArrayList<>();
+
+        // Добавляем онлайн игроков
+        names.addAll(getOnlinePlayerNames(partial));
+
+        // Добавляем оффлайн игроков из базы данных
+        Database database = Economy.getInstance().getDatabase();
+        List<String> offlinePlayers = database.getAllPlayerNames();
+
+        names.addAll(offlinePlayers.stream()
+                .filter(name -> name.toLowerCase().startsWith(partial.toLowerCase()))
+                .limit(10) // Ограничиваем количество для производительности
+                .collect(Collectors.toList()));
+
+        return names.stream().distinct().collect(Collectors.toList());
+    }
+
+    private List<String> getAvailableCurrencies(String partial) {
+        Database database = Economy.getInstance().getDatabase();
+        List<String> currencies = database.getAllCurrencies();
+
+        return currencies.stream()
+                .filter(currency -> currency.toLowerCase().startsWith(partial.toLowerCase()))
+                .collect(Collectors.toList());
+    }
+
+    private List<String> getPremiumItemIds(String partial) {
+        Database database = Economy.getInstance().getDatabase();
+        List<Map<String, Object>> items = database.getPremiumShopItems();
+
+        return items.stream()
+                .map(item -> String.valueOf(item.get("id")))
+                .filter(id -> id.startsWith(partial))
+                .collect(Collectors.toList());
     }
 
     private void handleGiveMoney(Player player, String[] args) {
@@ -101,13 +230,24 @@ public class AdminCommand implements Command {
         WalletManager walletManager = Economy.getInstance().getWalletManager();
         Database database = Economy.getInstance().getDatabase();
 
-        if (!database.playerHasWallet(targetPlayer)) {
-            player.sendMessage(colorize("&cИгрок не найден!"));
+        // Улучшенная проверка игрока
+        if (!playerExists(targetPlayer)) {
+            player.sendMessage(colorize("&cИгрок " + targetPlayer + " не найден!"));
+            player.sendMessage(colorize("&7Убедитесь что игрок заходил на сервер"));
             return;
         }
 
+        // Создаем кошелек если его нет
+        if (!database.playerHasWallet(targetPlayer)) {
+            database.createPlayer(targetPlayer, getPlayerUUID(targetPlayer));
+        }
+
         if (!walletManager.currencyExists(currency)) {
-            player.sendMessage(colorize("&cВалюта не существует!"));
+            player.sendMessage(colorize("&cВалюта " + currency + " не существует!"));
+            List<String> availableCurrencies = database.getAllCurrencies();
+            if (!availableCurrencies.isEmpty()) {
+                player.sendMessage(colorize("&7Доступные валюты: " + String.join(", ", availableCurrencies)));
+            }
             return;
         }
 
@@ -156,13 +296,28 @@ public class AdminCommand implements Command {
         WalletManager walletManager = Economy.getInstance().getWalletManager();
         Database database = Economy.getInstance().getDatabase();
 
+        if (!playerExists(targetPlayer)) {
+            player.sendMessage(colorize("&cИгрок " + targetPlayer + " не найден!"));
+            return;
+        }
+
         if (!database.playerHasWallet(targetPlayer)) {
-            player.sendMessage(colorize("&cИгрок не найден!"));
+            player.sendMessage(colorize("&cУ игрока " + targetPlayer + " нет кошелька!"));
             return;
         }
 
         if (!walletManager.currencyExists(currency)) {
-            player.sendMessage(colorize("&cВалюта не существует!"));
+            player.sendMessage(colorize("&cВалюта " + currency + " не существует!"));
+            return;
+        }
+
+        // Проверяем баланс перед изъятием
+        PlayerWallet wallet = walletManager.getPlayerWallet(targetPlayer);
+        int currentAmount = wallet.getSlots().getOrDefault(currency, 0);
+
+        if (currentAmount < amount) {
+            player.sendMessage(colorize("&cУ игрока недостаточно средств!"));
+            player.sendMessage(colorize("&7Доступно: " + String.format("%,d", currentAmount) + " " + currency));
             return;
         }
 
@@ -210,9 +365,14 @@ public class AdminCommand implements Command {
         WalletManager walletManager = Economy.getInstance().getWalletManager();
         Database database = Economy.getInstance().getDatabase();
 
-        if (!database.playerHasWallet(targetPlayer)) {
-            player.sendMessage(colorize("&cИгрок не найден!"));
+        if (!playerExists(targetPlayer)) {
+            player.sendMessage(colorize("&cИгрок " + targetPlayer + " не найден!"));
             return;
+        }
+
+        // Создаем кошелек если его нет
+        if (!database.playerHasWallet(targetPlayer)) {
+            database.createPlayer(targetPlayer, getPlayerUUID(targetPlayer));
         }
 
         PaymentResult result = walletManager.putMoney(targetPlayer, "VIL", amount);
@@ -336,7 +496,7 @@ public class AdminCommand implements Command {
         }
 
         Database database = Economy.getInstance().getDatabase();
-        var items = database.getPremiumShopItems();
+        List<Map<String, Object>> items = database.getPremiumShopItems();
 
         if (items.isEmpty()) {
             player.sendMessage(colorize("&7Премиум магазин пуст"));
@@ -344,7 +504,7 @@ public class AdminCommand implements Command {
         }
 
         player.sendMessage(colorize("&6=== Премиум магазин ==="));
-        for (var item : items) {
+        for (Map<String, Object> item : items) {
             int id = (Integer) item.get("id");
             String name = (String) item.get("display_name");
             String description = (String) item.get("description");
@@ -356,6 +516,56 @@ public class AdminCommand implements Command {
             player.sendMessage(colorize("  &7Описание: &f" + description));
             player.sendMessage(colorize("  &7Количество: &f" + (stock == -1 ? "∞" : stock)));
         }
+    }
+
+    private void handleWallet(Player player, String[] args) {
+        if (args.length != 2) {
+            player.sendMessage(colorize("&cИспользование: /ecoadmin wallet <игрок>"));
+            return;
+        }
+
+        String targetPlayer = args[1];
+        Database database = Economy.getInstance().getDatabase();
+        WalletManager walletManager = Economy.getInstance().getWalletManager();
+
+        if (!playerExists(targetPlayer)) {
+            player.sendMessage(colorize("&cИгрок " + targetPlayer + " не найден!"));
+            return;
+        }
+
+        if (!database.playerHasWallet(targetPlayer)) {
+            player.sendMessage(colorize("&cУ игрока " + targetPlayer + " нет кошелька!"));
+            player.sendMessage(colorize("&7Игрок должен зайти на сервер для создания кошелька"));
+            return;
+        }
+
+        PlayerWallet wallet = walletManager.getPlayerWallet(targetPlayer);
+        player.sendMessage(colorize("&6=== Кошелек игрока " + targetPlayer + " ==="));
+
+        if (wallet.getSlots().isEmpty()) {
+            player.sendMessage(colorize("&7Кошелек пуст"));
+            return;
+        }
+
+        // Сортируем валюты: VIL первая, остальные по алфавиту
+        Map<String, Integer> sortedWallet = new TreeMap<>((a, b) -> {
+            if (a.equals("VIL")) return -1;
+            if (b.equals("VIL")) return 1;
+            return a.compareTo(b);
+        });
+        sortedWallet.putAll(wallet.getSlots());
+
+        for (Map.Entry<String, Integer> entry : sortedWallet.entrySet()) {
+            String currency = entry.getKey();
+            int amount = entry.getValue();
+
+            if (amount > 0) {
+                String prefix = currency.equals("VIL") ? "&6💰 " : "&f💰 ";
+                player.sendMessage(colorize(prefix + currency + ": &f" + String.format("%,d", amount)));
+            }
+        }
+
+        player.sendMessage(colorize("&7Всего валют: &f" + sortedWallet.size()));
     }
 
     private void handleReload(Player player) {
@@ -415,6 +625,8 @@ public class AdminCommand implements Command {
             player.sendMessage(colorize("&7/ecoadmin takemoney <игрок> <валюта> <количество> &f- изъять деньги"));
         }
 
+        player.sendMessage(colorize("&7/ecoadmin wallet <игрок> &f- просмотр кошелька игрока"));
+
         if (player.hasPermission("economy.admin.premium")) {
             player.sendMessage(colorize("&7/ecoadmin givevil <игрок> <количество> &f- выдать VIL"));
             player.sendMessage(colorize("&7/ecoadmin addpremium <название> <цена> <описание> [кол-во] &f- добавить в премиум магазин"));
@@ -431,6 +643,29 @@ public class AdminCommand implements Command {
         }
 
         player.sendMessage(colorize("&7/ecoadmin stats &f- статистика плагина"));
+    }
+
+    private boolean playerExists(String playerName) {
+        // Проверяем онлайн игроков
+        if (Bukkit.getPlayer(playerName) != null) {
+            return true;
+        }
+
+        // Проверяем оффлайн игроков
+        @SuppressWarnings("deprecation")
+        OfflinePlayer offlinePlayer = Bukkit.getOfflinePlayer(playerName);
+        return offlinePlayer.hasPlayedBefore() || offlinePlayer.isOnline();
+    }
+
+    private String getPlayerUUID(String playerName) {
+        Player onlinePlayer = Bukkit.getPlayer(playerName);
+        if (onlinePlayer != null) {
+            return onlinePlayer.getUniqueId().toString();
+        }
+
+        @SuppressWarnings("deprecation")
+        OfflinePlayer offlinePlayer = Bukkit.getOfflinePlayer(playerName);
+        return offlinePlayer.getUniqueId().toString();
     }
 
     private String serializeItem(ItemStack item) {
