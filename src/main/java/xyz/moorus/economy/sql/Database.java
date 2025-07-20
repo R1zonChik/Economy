@@ -271,10 +271,14 @@ public class Database {
     public String getFactionCurrency(String factionId) {
         try (Connection connection = getConnection();
              PreparedStatement statement = connection.prepareStatement(
-                     "SELECT currency_name FROM currencies WHERE faction_id = ?")) {
+                     "SELECT currency_name FROM currencies WHERE faction_id = ? LIMIT 1")) {
             statement.setString(1, factionId);
             ResultSet rs = statement.executeQuery();
-            return rs.next() ? rs.getString("currency_name") : null;
+            if (rs.next()) {
+                String currency = rs.getString("currency_name");
+                return currency;
+            }
+            return null;
         } catch (SQLException e) {
             plugin.getLogger().severe("Ошибка при получении валюты фракции: " + e.getMessage());
             return null;
@@ -420,7 +424,11 @@ public class Database {
                      "SELECT COUNT(*) FROM currencies WHERE faction_id = ?")) {
             statement.setString(1, factionId);
             ResultSet rs = statement.executeQuery();
-            return rs.next() && rs.getInt(1) > 0;
+            if (rs.next()) {
+                int count = rs.getInt(1);
+                return count > 0;
+            }
+            return false;
         } catch (SQLException e) {
             plugin.getLogger().severe("Ошибка при проверке валюты фракции: " + e.getMessage());
             return false;

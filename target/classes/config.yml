@@ -1,4 +1,13 @@
-# Настройки базы данных Economy
+# ====================================
+# Economy Plugin Configuration
+# ====================================
+
+# Версия конфига (не изменяйте!)
+config_version: "1.0"
+
+# ====================================
+# НАСТРОЙКИ БАЗЫ ДАННЫХ
+# ====================================
 database:
   # Тип базы данных: sqlite или mysql
   type: "sqlite"
@@ -10,260 +19,286 @@ database:
   username: "root"
   password: ""
 
-# Настройки кошелька
-wallet:
-  # Количество валют на одной странице при просмотре кошелька
-  currencies_per_page: 10
+  # Настройки пула соединений
+  pool:
+    maximum_pool_size: 10
+    minimum_idle: 2
+    connection_timeout: 30000
+    idle_timeout: 600000
+    max_lifetime: 1800000
 
+# ====================================
+# НАСТРОЙКИ ВАЛЮТ
+# ====================================
+currencies:
   # Стартовый баланс VIL для новых игроков
   starting_vil_balance: 100
 
-# Лимиты системы
-limits:
-  # Максимальная сумма перевода за раз
-  max_transfer_amount: 1000000000
+  # Требования к названию валют
+  name_requirements:
+    # Длина названия валюты (только 3 символа)
+    length: 3
+    # Только заглавные латинские буквы
+    pattern: "^[A-Z]{3}$"
 
-  # Максимальное количество ордеров на бирже по умолчанию
-  max_orders_per_player: 3
+  # Зарезервированные названия валют (нельзя создать)
+  reserved:
+    - "VIL"  # Системная валюта
+    - "USD"  # Доллар США
+    - "EUR"  # Евро
+    - "RUB"  # Российский рубль
+    - "GBP"  # Британский фунт
+    - "JPY"  # Японская йена
+    - "CHF"  # Швейцарский франк
+    - "CAD"  # Канадский доллар
+    - "AUD"  # Австралийский доллар
+    - "CNY"  # Китайский юань
+    - "KRW"  # Южнокорейская вона
+    - "INR"  # Индийская рупия
+    - "BRL"  # Бразильский реал
+    - "MXN"  # Мексиканское песо
+    - "ZAR"  # Южноафриканский рэнд
 
-# Настройки аукциона
+  # Разрешенные примеры валют
+  allowed_examples:
+    - "ABC"
+    - "XYZ"
+    - "FOO"
+    - "BAR"
+    - "DEF"
+    - "GHI"
+    - "JKL"
+    - "MNO"
+    - "PQR"
+    - "STU"
+
+# ====================================
+# НАСТРОЙКИ ЭМИССИИ
+# ====================================
+emission:
+  # Максимальная эмиссия по умолчанию для новых валют
+  default_max_emission: 1000000000
+
+  # Минимальная эмиссия
+  min_emission: 1000
+
+  # Максимальная эмиссия
+  max_emission: 2000000000
+
+  # Лимиты эмиссии для системных валют
+  system_limits:
+    VIL: 2000000000
+
+# ====================================
+# НАСТРОЙКИ КОШЕЛЬКА
+# ====================================
+wallet:
+  # Количество валют на одной странице
+  currencies_per_page: 10
+
+  # Максимальное количество валют в кошельке
+  max_currencies: 50
+
+  # Автосохранение кошельков (в секундах)
+  auto_save_interval: 300
+
+# ====================================
+# НАСТРОЙКИ АУКЦИОНА
+# ====================================
 auction:
-  # Время в часах, сколько предмет остается на аукционе
+  # Время жизни лота в часах
   expiration_hours: 72
 
-  # Максимальное количество предметов на аукционе по умолчанию
-  default_max_items: 10
+  # Максимальное количество предметов на аукционе на игрока
+  max_items_per_player: 10
+
+  # Минимальная цена предмета
+  min_price: 1
+
+  # Максимальная цена предмета
+  max_price: 1000000000
 
   # Настройки GUI
   gui:
-    # Размер инвентаря (9, 18, 27, 36, 45, 54)
     size: 54
-
-    # Заголовки окон
     titles:
-      main: "&6Аукцион"
-      categories: "&6Категории аукциона"
+      main: "&6§lАУКЦИОН"
+      currency_selection: "&6Аукцион - {currency}"
+      items: "&6Предметы - {category}"
       expired: "&cИстекшие предметы"
-      premium: "&6Премиум магазин"
+      premium: "&6⭐ ПРЕМИУМ МАГАЗИН ⭐"
 
-    # Позиции кнопок навигации
-    buttons:
-      categories: 49
-      expired: 53
-      premium: 45
-      next_page: 50
-      prev_page: 48
-
-    # Предметы для кнопок
-    items:
-      categories:
-        material: "CHEST"
-        name: "&6Категории"
-        lore:
-          - "&7Нажмите для выбора категории"
-
-      expired:
-        material: "HOPPER"
-        name: "&cИстекшие предметы"
-        lore:
-          - "&7Заберите свои предметы"
-
-      premium:
-        material: "EMERALD"
-        name: "&6Премиум магазин"
-        lore:
-          - "&7Покупка за VIL"
-
-      next_page:
-        material: "ARROW"
-        name: "&aСледующая страница"
-        lore:
-          - "&7Нажмите для перехода"
-
-      prev_page:
-        material: "ARROW"
-        name: "&cПредыдущая страница"
-        lore:
-          - "&7Нажмите для перехода"
-
-  # Настройки категорий
+  # Категории предметов
   categories:
-    COMBAT:
-      name: "&cБой"
-      material: "DIAMOND_SWORD"
-      lore:
-        - "&7Оружие и боевые предметы"
+    BUILDING_BLOCKS:
+      name: "&6Блоки"
+      icon: "BRICKS"
+      description: "Строительные блоки"
 
-    TOOLS:
-      name: "&eИнструменты"
-      material: "DIAMOND_PICKAXE"
-      lore:
-        - "&7Кирки, лопаты, топоры"
+    DECORATIONS:
+      name: "&5Декорации"
+      icon: "PAINTING"
+      description: "Декоративные предметы"
 
-    ARMOR:
-      name: "&9Броня"
-      material: "DIAMOND_CHESTPLATE"
-      lore:
-        - "&7Шлемы, нагрудники, поножи, ботинки"
+    REDSTONE:
+      name: "&cРедстоун"
+      icon: "REDSTONE"
+      description: "Редстоун механизмы"
 
-    BLOCKS:
-      name: "&7Блоки"
-      material: "STONE"
-      lore:
-        - "&7Строительные блоки"
+    TRANSPORTATION:
+      name: "&9Транспорт"
+      icon: "MINECART"
+      description: "Транспортные средства"
+
+    MISCELLANEOUS:
+      name: "&7Разное"
+      icon: "LAVA_BUCKET"
+      description: "Прочие предметы"
 
     FOOD:
       name: "&aЕда"
-      material: "BREAD"
-      lore:
-        - "&7Продукты питания"
+      icon: "APPLE"
+      description: "Продукты питания"
 
-    MISC:
-      name: "&dРазное"
-      material: "CHEST"
-      lore:
-        - "&7Прочие предметы"
+    TOOLS:
+      name: "&eИнструменты"
+      icon: "DIAMOND_PICKAXE"
+      description: "Инструменты и утилиты"
 
-  # Настройки отображения предметов
-  item_display:
-    # Лор для предметов на аукционе
-    auction_lore:
-      - ""
-      - "&7Продавец: &f{seller}"
-      - "&7Цена: &e{price} {currency}"
-      - "&7Категория: &f{category}"
-      - "&7Истекает: &f{expires}"
-      - ""
-      - "&aЛКМ - Купить"
-      - "&cПКМ - Подробнее"
+    COMBAT:
+      name: "&4Оружие"
+      icon: "DIAMOND_SWORD"
+      description: "Боевые предметы"
 
-    # Лор для истекших предметов
-    expired_lore:
-      - ""
-      - "&cИстекший предмет"
-      - "&7Цена была: &e{price} {currency}"
-      - ""
-      - "&aЛКМ - Забрать"
+    BREWING:
+      name: "&dЗелья"
+      icon: "BREWING_STAND"
+      description: "Зелья и ингредиенты"
 
-    # Лор для премиум предметов
-    premium_lore:
-      - "&7{description}"
-      - ""
-      - "&7Цена: &e{price} VIL"
-      - "&7В наличии: &f{stock}"
-      - ""
-      - "&aЛКМ - Купить"
-
-# Настройки биржи
+# ====================================
+# НАСТРОЙКИ БИРЖИ
+# ====================================
 bourse:
-  # Максимальное количество ордеров по умолчанию
-  default_max_orders: 3
+  # Максимальное количество ордеров на игрока
+  max_orders_per_player: 5
+
+  # Минимальная сумма ордера
+  min_order_amount: 1
+
+  # Максимальная сумма ордера
+  max_order_amount: 1000000000
+
+  # Комиссия биржи (в процентах)
+  commission_rate: 0.01
 
   # Настройки GUI
   gui:
     size: 54
     titles:
       main: "&6Биржа валют"
+      trading_pair: "&6{sell_currency} → {buy_currency}"
       my_orders: "&6Мои ордера"
-      trading_pair: "&6{currency1} → {currency2}"
 
-    # Позиции кнопок
-    buttons:
-      create_order: 49
-      my_orders: 53
-      stats: 22
-      back: 45
-      refresh: 53
-      next_page: 50
-      prev_page: 48
-
-  # Настройки отображения ордеров
-  order_display:
-    # Лор для ордеров на бирже
-    order_lore:
-      - "&7Продавец: &f{seller}"
-      - "&7Продает: &e{sell_amount} {sell_currency}"
-      - "&7Покупает: &e{buy_amount} {buy_currency}"
-      - "&7Курс: &f{rate}"
-      - ""
-      - "&aЛКМ - Купить"
-      - "&cПКМ - Подробнее"
-
-    # Лор для своих ордеров
-    my_order_lore:
-      - "&7Продаю: &e{sell_amount} {sell_currency}"
-      - "&7Покупаю: &e{buy_amount} {buy_currency}"
-      - "&7Курс: &f{rate}"
-      - "&7Статус: &aАктивен"
-      - ""
-      - "&cЛКМ - Отменить ордер"
-      - "&eПКМ - Подробная информация"
-      - "&7Shift+ЛКМ - Подтвердить отмену"
-
-# Настройки премиум магазина
+# ====================================
+# НАСТРОЙКИ ПРЕМИУМ МАГАЗИНА
+# ====================================
 premium_shop:
   enabled: true
+
+  # Валюта премиум магазина
+  currency: "VIL"
 
   # Настройки GUI
   gui:
     size: 54
-    title: "&6Премиум магазин"
+    title: "&6⭐ ПРЕМИУМ МАГАЗИН ⭐"
 
-# Настройки валют
-currencies:
-  # Стартовый баланс VIL для новых игроков
-  starting_vil_balance: 100
+  # Автообновление магазина
+  auto_refresh: true
+  refresh_interval: 3600  # в секундах
 
-  # Максимальная длина названия валюты
-  max_currency_name_length: 3
+# ====================================
+# ЛИМИТЫ СИСТЕМЫ
+# ====================================
+limits:
+  # Максимальная сумма перевода за раз
+  max_transfer_amount: 1000000000
 
-  # Минимальная длина названия валюты
-  min_currency_name_length: 3
+  # Максимальное количество транзакций в день
+  max_transactions_per_day: 100
 
-  # Зарезервированные названия валют
-  reserved:
-    - "VIL"
-    - "USD"
-    - "EUR"
-    - "RUB"
-    - "GBP"
-    - "JPY"
-    - "CHF"
-    - "CAD"
-    - "AUD"
+  # Максимальное количество валют на сервере
+  max_currencies: 50
 
-# Настройки эмиссии валют
-emission:
-  # Максимальная эмиссия по умолчанию для новых валют
-  default_max_emission: 1000000000
+  # Максимальное количество фракций
+  max_factions: 100
 
-  # Лимиты эмиссии для системных валют
-  system_limits:
-    VIL: 2000000000
+# ====================================
+# НАСТРОЙКИ ИНТЕГРАЦИИ
+# ====================================
+integration:
+  # Medieval Factions
+  medieval_factions:
+    enabled: true
+    currency_permission: "CURRENCY_MANAGE"
+    auto_create_temp_faction: true
 
-# Сообщения
+  # PlaceholderAPI
+  placeholderapi:
+    enabled: true
+
+  # Vault
+  vault:
+    enabled: false
+    hook_vil_as_main_currency: true
+
+# ====================================
+# СООБЩЕНИЯ
+# ====================================
 messages:
   prefix: "&6[Economy] &r"
+
+  # Общие сообщения
   no_permission: "&cУ вас нет прав!"
   player_not_found: "&cИгрок не найден!"
   invalid_amount: "&cНеверная сумма!"
   invalid_currency: "&cНеверная валюта!"
   database_loading: "&eБаза данных загружается, попробуйте позже..."
-  wallet_empty: "&7Ваш кошелек пуст"
-  payment_success: "&aПеревод выполнен успешно!"
-  not_enough_money: "&cНедостаточно средств!"
-  currency_created: "&aВалюта {currency} создана успешно!"
-  currency_exists: "&cТакая валюта уже существует!"
+  command_usage: "&cИспользование: {usage}"
 
-  # Сообщения о валютах
+  # Сообщения валют
   currency:
+    created: "&aВалюта {currency} создана успешно!"
+    exists: "&cТакая валюта уже существует!"
     invalid_name: "&cНеверное название валюты!"
     reserved_currency: "&cЭта валюта зарезервирована!"
-    name_requirements: "&7Требования: 3 заглавные латинские буквы"
-    reserved_list: "&7Зарезервированные: VIL, USD, EUR, RUB, GBP, JPY, CHF, CAD, AUD"
-    allowed_examples: "&aПримеры: ABC, XYZ, FOO, BAR, TEST"
     wrong_length: "&cНазвание валюты должно содержать ровно 3 символа!"
     only_latin_uppercase: "&cИспользуйте только заглавные латинские буквы!"
+    name_requirements: "&7Требования: 3 заглавные латинские буквы"
+    reserved_list: "&7Зарезервированные: VIL, USD, EUR, RUB, GBP, JPY, CHF, CAD, AUD"
+    allowed_examples: "&aПримеры разрешенных валют: ABC, XYZ, FOO, BAR, DEF"
+    faction_already_has_currency: "&cВаша фракция уже имеет валюту!"
+    no_faction: "&cВы должны состоять во фракции для создания валюты!"
+    no_faction_permission: "&cУ вас нет прав на создание валюты во фракции!"
+
+  # Сообщения кошелька
+  wallet:
+    empty: "&7Ваш кошелек пуст"
+    page_header: "&6=== Кошелек игрока {player} (страница {page}/{total}) ==="
+    vil_balance: "&6⭐ VIL: &e{amount} &7(Премиум валюта)"
+    currency_balance: "&7{currency}: &f{amount}"
+    total_currencies: "&7Всего валют: &f{count}"
+    invalid_page: "&cСтраница {page} не существует!"
+    navigation_hint: "&7Используйте &f/wallet {page} &7для перехода"
+
+  # Сообщения переводов
+  transfer:
+    success: "&aПеревод выполнен успешно!"
+    sent: "&aВы отправили {amount} {currency} игроку {player}"
+    received: "&aВы получили {amount} {currency} от игрока {player}"
+    not_enough_money: "&cНедостаточно средств!"
+    cannot_send_to_self: "&cВы не можете отправить деньги самому себе!"
+    amount_too_large: "&cСлишком большая сумма!"
 
   # Сообщения аукциона
   auction:
@@ -274,81 +309,156 @@ messages:
     item_expired: "&cВремя продажи предмета истекло"
     item_returned: "&aПредмет возвращен в ваш инвентарь!"
     max_items_reached: "&cВы достигли лимита предметов на аукционе! ({max})"
-    item_listed: "&aПредмет выставлен на аукцион!"
+    item_listed: "&aПредмет выставлен на аукцион за {price} {currency}!"
     take_item_in_hand: "&cВозьмите предмет в руку!"
     invalid_price: "&cЦена должна быть больше 0!"
+    cannot_buy_own_item: "&cВы не можете купить свой предмет!"
+    item_already_sold: "&cПредмет уже продан!"
 
   # Сообщения биржи
   bourse:
-    order_created: "&aОрдер создан успешно!"
+    order_created: "&aОрдер создан успешно! ID: #{id}"
     order_cancelled: "&aОрдер #{id} отменен!"
     order_executed: "&aОрдер #{id} исполнен!"
     order_not_found: "&cОрдер не найден!"
     max_orders_reached: "&cВы достигли лимита ордеров! ({max})"
-    insufficient_funds: "&cНедостаточно средств!"
+    insufficient_funds: "&cНедостаточно средств для создания ордера!"
     same_currency: "&cНельзя обменивать валюту на саму себя!"
     invalid_order_id: "&cНеверный ID ордера!"
     cannot_buy_own_order: "&cВы не можете купить свой собственный ордер!"
     no_orders: "&7У вас нет активных ордеров"
+    order_partially_filled: "&aОрдер #{id} частично исполнен!"
 
   # Сообщения эмиссии
   emission:
     success: "&aУспешно выпущено {amount} {currency}!"
     no_permission: "&cУ вас нет прав на управление валютой {currency}!"
-    limit_exceeded: "&cПревышен лимит эмиссии!"
+    limit_exceeded: "&cПревышен лимит эмиссии! Доступно: {available}"
     current_emission: "&7Текущая эмиссия: &f{current}"
     max_emission: "&7Максимальная эмиссия: &f{max}"
     available_emission: "&7Доступно для выпуска: &f{available}"
+    invalid_amount: "&cНеверное количество для эмиссии!"
 
-  # Сообщения кошелька
-  wallet:
-    page_header: "&6=== Ваш кошелек (страница {page}/{total}) ==="
-    vil_balance: "&6⭐ VIL: &e{amount} &7(Премиум валюта)"
-    currency_balance: "&7{currency}: &f{amount}"
-    total_currencies: "&7Всего валют: &f{count}"
-    navigation: "&7Страницы: {navigation}"
-    next_page_hint: "&7Используйте &f/pw {page} &7для следующей страницы"
-    invalid_page: "&cОшибка: страница {page} не существует!"
-    total_pages: "&7Всего страниц: {total}"
+  # Сообщения премиум магазина
+  premium:
+    item_purchased: "&a⭐ Предмет куплен за {price} VIL! ⭐"
+    insufficient_vil: "&cНедостаточно VIL! Нужно: {price}"
+    item_out_of_stock: "&cПредмет закончился!"
+    shop_empty: "&7Премиум магазин пуст"
 
-# Настройки производительности
+# ====================================
+# НАСТРОЙКИ ПРОИЗВОДИТЕЛЬНОСТИ
+# ====================================
 performance:
-  # Использовать асинхронные операции с базой данных
+  # Использовать асинхронные операции
   async_database: true
 
-  # Интервал очистки истекших аукционов (в минутах)
+  # Интервал автосохранения (в секундах)
+  auto_save_interval: 300
+
+  # Размер кэша кошельков
+  wallet_cache_size: 1000
+
+  # Время жизни кэша (в секундах)
+  cache_expire_time: 600
+
+  # Пакетная обработка транзакций
+  batch_transactions: true
+  batch_size: 100
+
+# ====================================
+# НАСТРОЙКИ ОЧИСТКИ
+# ====================================
+cleanup:
+  # Автоматическая очистка
+  auto_cleanup: true
+
+  # Интервал очистки (в минутах)
   cleanup_interval: 60
 
-  # Размер пула соединений с базой данных
-  database_pool_size: 5
+  # Количество дней для хранения транзакций
+  transaction_days_to_keep: 30
 
-  # Интервал автосохранения кошельков (в секундах)
-  wallet_save_interval: 300
+  # Очистка истекших аукционов
+  auto_cleanup_expired_auctions: true
 
-# Настройки интеграции
-integration:
-  # Medieval Factions
-  medieval_factions:
-    enabled: true
-    currency_permission: "CURRENCY_MANAGE"
+  # Очистка пустых кошельков
+  cleanup_empty_wallets: false
 
-  # PlaceholderAPI
-  placeholderapi:
-    enabled: true
-
-# Настройки отладки
+# ====================================
+# НАСТРОЙКИ ОТЛАДКИ
+# ====================================
 debug:
   enabled: false
   log_transactions: true
   log_database_queries: false
+  log_wallet_operations: false
+  verbose_logging: false
 
-# Настройки очистки данных
-cleanup:
-  # Количество дней для хранения транзакций
-  transaction_days_to_keep: 30
+# ====================================
+# НАСТРОЙКИ БЕЗОПАСНОСТИ
+# ====================================
+security:
+  # Максимальное количество попыток операций в минуту
+  rate_limit: 60
 
-  # Автоматическая очистка истекших аукционов
-  auto_cleanup_expired_auctions: true
+  # Блокировка подозрительных операций
+  fraud_detection: true
 
-  # Интервал очистки в минутах
-  cleanup_interval_minutes: 60
+  # Логирование всех операций
+  audit_log: true
+
+  # Проверка целостности данных
+  data_integrity_check: true
+
+# ====================================
+# ЭКСПЕРИМЕНТАЛЬНЫЕ ФУНКЦИИ
+# ====================================
+experimental:
+  # Новый алгоритм кэширования
+  advanced_caching: false
+
+  # Оптимизация базы данных
+  database_optimization: false
+
+  # Предварительная загрузка данных
+  data_preloading: false
+
+# ====================================
+# НАСТРОЙКИ УВЕДОМЛЕНИЙ
+# ====================================
+notifications:
+  # Уведомления о переводах
+  transfer_notifications: true
+
+  # Уведомления о продажах на аукционе
+  auction_notifications: true
+
+  # Уведомления об исполнении ордеров
+  bourse_notifications: true
+
+  # Звуковые уведомления
+  sound_notifications: true
+  sounds:
+    money_received: "ENTITY_EXPERIENCE_ORB_PICKUP"
+    item_sold: "ENTITY_VILLAGER_YES"
+    order_executed: "BLOCK_NOTE_BLOCK_PLING"
+
+# ====================================
+# НАСТРОЙКИ ЛОКАЛИЗАЦИИ
+# ====================================
+localization:
+  # Язык по умолчанию
+  default_language: "ru"
+
+  # Формат чисел
+  number_format: "#,###"
+
+  # Формат даты и времени
+  date_format: "dd.MM.yyyy HH:mm"
+
+  # Часовой пояс
+  timezone: "Europe/Moscow"
+
+# Не изменяйте эту строку!
+version: "1.0-SNAPSHOT"
