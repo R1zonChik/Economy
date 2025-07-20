@@ -2,11 +2,19 @@ package xyz.moorus.economy.command;
 
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
+import xyz.moorus.economy.integration.MedievalFactionsIntegration;
 import xyz.moorus.economy.main.Economy;
 import xyz.moorus.economy.money.WalletManager;
 import xyz.moorus.economy.sql.Database;
 
 public class CreateCurrencyCommand implements Command {
+
+    private MedievalFactionsIntegration mfIntegration;
+
+    public CreateCurrencyCommand() {
+        // Инициализируем интеграцию при создании команды
+        this.mfIntegration = null; // Будет инициализирована в execute
+    }
 
     @Override
     public String getName() {
@@ -18,38 +26,37 @@ public class CreateCurrencyCommand implements Command {
         Player player = Bukkit.getPlayer(sender);
         if (player == null) return;
 
+        // Инициализируем интеграцию если еще не сделали
+        if (mfIntegration == null) {
+            mfIntegration = Economy.getInstance().getMedievalFactionsIntegration();
+        }
+
         if (args.length == 0) {
             showHelp(player);
             return;
         }
 
-        // Создаем новый массив для handleCreateCurrency
-        String[] newArgs = new String[args.length + 1];
-        newArgs[0] = "create"; // Добавляем команду create
-        System.arraycopy(args, 0, newArgs, 1, args.length);
+        if (args.length != 2) {
+            player.sendMessage(colorize("&cИспользование: /cc <название> <максимальная_эмиссия>"));
+            player.sendMessage(colorize("&7Пример: /cc ABC 1000000"));
+            return;
+        }
 
         // Вызываем метод создания валюты
-        handleCreateCurrency(player, newArgs);
+        handleCreateCurrency(player, args);
     }
 
-    // ВОТ СЮДА ВСТАВЛЯЕШЬ ВЕСЬ МЕТОД handleCreateCurrency
     private void handleCreateCurrency(Player player, String[] args) {
         if (!player.hasPermission("economy.currency.create")) {
             player.sendMessage(colorize("&cУ вас нет прав на создание валют!"));
             return;
         }
 
-        if (args.length != 3) {
-            player.sendMessage(colorize("&cИспользование: /cc <название> <максимальная_эмиссия>"));
-            player.sendMessage(colorize("&7Пример: /cc ABC 1000000"));
-            return;
-        }
-
-        String currencyName = args[1].toUpperCase();
+        String currencyName = args[0].toUpperCase();
         long maxEmission;
 
         try {
-            maxEmission = Long.parseLong(args[2]);
+            maxEmission = Long.parseLong(args[1]);
         } catch (NumberFormatException e) {
             player.sendMessage(colorize("&cНеверная максимальная эмиссия!"));
             return;
@@ -80,85 +87,58 @@ public class CreateCurrencyCommand implements Command {
             return;
         }
 
-        // ИСПРАВЛЕННАЯ ПРОВЕРКА ФРАКЦИИ
-        String playerFactionId = null;
-        boolean hasPermission = false;
-
-        // Проверяем через Medieval Factions API
-        if (Bukkit.getPluginManager().getPlugin("MedievalFactions") != null) {
-            try {
-                // Используем рефлексию для безопасного вызова
-                Object medievalFactions = Bukkit.getPluginManager().getPlugin("MedievalFactions");
-                Object services = medievalFactions.getClass().getMethod("getServices").invoke(medievalFactions);
-                Object playerService = services.getClass().getMethod("getPlayerService").invoke(services);
-                Object factionService = services.getClass().getMethod("getFactionService").invoke(services);
-
-                // Получаем MfPlayerId
-                Class<?> mfPlayerIdClass = Class.forName("com.dansplugins.factionsystem.player.MfPlayerId");
-                Object playerId = mfPlayerIdClass.getMethod("fromBukkitPlayer", org.bukkit.entity.Player.class).invoke(null, player);
-
-                // Получаем игрока
-                Object mfPlayer = playerService.getClass().getMethod("getPlayer", mfPlayerIdClass).invoke(playerService, playerId);
-
-                if (mfPlayer != null) {
-                    // Получаем ID фракции
-                    Object factionId = mfPlayer.getClass().getMethod("getFactionId").invoke(mfPlayer);
-                    if (factionId != null) {
-                        // Получаем фракцию
-                        Object faction = factionService.getClass().getMethod("getFaction", factionId.getClass()).invoke(factionService, factionId);
-                        if (faction != null) {
-                            playerFactionId = factionId.getClass().getMethod("getValue").invoke(factionId).toString();
-
-                            // Проверяем права на управление валютой
-                            Object permissions = medievalFactions.getClass().getMethod("getFactionPermissions").invoke(medievalFactions);
-                            Object currencyManagePermission = permissions.getClass().getMethod("getCurrencyManage").invoke(permissions);
-
-                            // Проверяем есть ли право
-                            hasPermission = (boolean) faction.getClass().getMethod("hasPermission",
-                                    playerId.getClass(), currencyManagePermission.getClass()).invoke(faction, playerId, currencyManagePermission);
-
-                            if (!hasPermission) {
-                                player.sendMessage(colorize("&cУ вас нет прав на управление валютой фракции!"));
-                                player.sendMessage(colorize("&7Обратитесь к лидеру фракции за правами"));
-                                return;
-                            }
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                Economy.getInstance().getLogger().warning("Ошибка при работе с Medieval Factions: " + e.getMessage());
-                // Продолжаем с временной системой
-            }
+        // ПРОВЕРКА MEDIEVAL FACTIONS
+        if (!mfIntegration.isEnabled()) {
+            player.sendMessage(colorize("&cПлагин Medieval Factions не найден!"));
+            return;
         }
 
-        // Если фракции нет или нет Medieval Factions, используем временную систему
-        if (playerFactionId == null) {
-            Database database = Economy.getInstance().getDatabase();
-            playerFactionId = database.getPlayerFactionId(player.getName());
+        // ОТЛАДКА - показываем всех игроков в MF
+        player.sendMessage(colorize("&7Запуск отладки Medieval Factions..."));
+        mfIntegration.debugPlayers();
 
-            if (playerFactionId == null) {
-                // Создаем временную фракцию
-                if (database.createTempFaction(player.getName())) {
-                    playerFactionId = database.getPlayerFactionId(player.getName());
-                    player.sendMessage(colorize("&7Создана временная фракция для управления валютой"));
-                    hasPermission = true; // Владелец временной фракции имеет все права
-                } else {
-                    player.sendMessage(colorize("&cОшибка при создании временной фракции!"));
-                    return;
-                }
-            } else {
-                // Проверяем права в временной фракции
-                hasPermission = database.hasPermissionInFaction(player.getName(), playerFactionId, "CURRENCY_MANAGE");
-                if (!hasPermission) {
-                    player.sendMessage(colorize("&cУ вас нет прав на управление валютой фракции!"));
-                    return;
-                }
-            }
+        // Проверяем состоит ли игрок во фракции
+        boolean inFaction = mfIntegration.isPlayerInFaction(player);
+        player.sendMessage(colorize("&7Отладка: Вы во фракции = " + inFaction));
+
+        if (!inFaction) {
+            player.sendMessage(colorize("&cВы не состоите во фракции!"));
+            player.sendMessage(colorize("&7Создайте фракцию: &f/faction create <название>"));
+            player.sendMessage(colorize("&7Или вступите в существующую: &f/faction join <название>"));
+            return;
+        }
+
+        // Получаем ID фракции
+        String playerFactionId = mfIntegration.getPlayerFactionId(player);
+        player.sendMessage(colorize("&7Отладка: ID фракции = " + playerFactionId));
+
+        if (playerFactionId == null) {
+            player.sendMessage(colorize("&cОшибка получения ID фракции!"));
+            return;
+        }
+
+        // Получаем название фракции
+        String factionName = mfIntegration.getFactionName(playerFactionId);
+        player.sendMessage(colorize("&7Отладка: Название фракции = " + factionName));
+
+        // Проверяем права на управление валютой
+        boolean hasPermission = mfIntegration.hasCurrencyManagePermission(player);
+        player.sendMessage(colorize("&7Отладка: Права на валюту = " + hasPermission));
+
+        if (!hasPermission) {
+            player.sendMessage(colorize("&cУ вас нет прав на управление валютой фракции!"));
+            player.sendMessage(colorize("&7Обратитесь к лидеру фракции за правами"));
+            player.sendMessage(colorize("&7Необходимо право: &fCURRENCY_MANAGE"));
+            player.sendMessage(colorize("&7Фракция: &f" + factionName));
+            return;
         }
 
         // Проверяем что у фракции еще нет валюты
         Database database = Economy.getInstance().getDatabase();
-        if (database.factionHasCurrency(playerFactionId)) {
+        boolean factionHasCurrency = database.factionHasCurrency(playerFactionId);
+        player.sendMessage(colorize("&7Отладка: Фракция имеет валюту = " + factionHasCurrency));
+
+        if (factionHasCurrency) {
             String existingCurrency = database.getFactionCurrency(playerFactionId);
             player.sendMessage(colorize("&cВаша фракция уже имеет валюту: " + existingCurrency));
             player.sendMessage(colorize("&7Одна фракция может иметь только одну валюту"));
@@ -166,12 +146,17 @@ public class CreateCurrencyCommand implements Command {
         }
 
         // Создаем валюту
-        if (walletManager.createCurrency(currencyName, playerFactionId, maxEmission)) {
-            String factionName = database.getFactionName(playerFactionId);
-            if (factionName == null) factionName = "Неизвестная фракция";
+        player.sendMessage(colorize("&7Создание валюты..."));
 
-            player.sendMessage(colorize("&aВалюта " + currencyName + " успешно создана!"));
+        boolean success = walletManager.createCurrency(currencyName, playerFactionId, maxEmission);
+        player.sendMessage(colorize("&7Отладка: Создание успешно = " + success));
+
+        if (success) {
+            if (factionName == null) factionName = "Фракция #" + playerFactionId;
+
+            player.sendMessage(colorize("&a✓ Валюта " + currencyName + " успешно создана!"));
             player.sendMessage(colorize("&7Фракция: &f" + factionName));
+            player.sendMessage(colorize("&7ID фракции: &f" + playerFactionId));
             player.sendMessage(colorize("&7Максимальная эмиссия: &e" + String.format("%,d", maxEmission)));
             player.sendMessage(colorize("&7Текущая эмиссия: &f0"));
             player.sendMessage(colorize("&e"));
@@ -182,11 +167,16 @@ public class CreateCurrencyCommand implements Command {
                     "CURRENCY_CREATE", "Currency " + currencyName + " created by faction " + factionName);
 
             Economy.getInstance().getLogger().info("Игрок " + player.getName() +
-                    " создал валюту " + currencyName + " для фракции " + factionName);
+                    " создал валюту " + currencyName + " для фракции " + factionName + " (ID: " + playerFactionId + ")");
 
         } else {
             player.sendMessage(colorize("&cОшибка при создании валюты!"));
             player.sendMessage(colorize("&7Возможно, валюта уже существует или произошла ошибка базы данных"));
+
+            // Дополнительная отладка
+            player.sendMessage(colorize("&7Отладка: Проверьте логи сервера для подробностей"));
+            Economy.getInstance().getLogger().warning("Ошибка создания валюты " + currencyName +
+                    " для игрока " + player.getName() + " (фракция: " + playerFactionId + ")");
         }
     }
 
@@ -197,10 +187,49 @@ public class CreateCurrencyCommand implements Command {
         player.sendMessage(colorize("&e"));
         showRequirements(player);
         player.sendMessage(colorize("&e"));
-        player.sendMessage(colorize("&7Примечания:"));
+        player.sendMessage(colorize("&7Требования:"));
         player.sendMessage(colorize("&8• Вы должны состоять во фракции"));
         player.sendMessage(colorize("&8• У вас должно быть право CURRENCY_MANAGE"));
         player.sendMessage(colorize("&8• Фракция может создать только одну валюту"));
+        player.sendMessage(colorize("&e"));
+
+        // Показываем статус интеграции
+        if (mfIntegration == null) {
+            mfIntegration = Economy.getInstance().getMedievalFactionsIntegration();
+        }
+
+        player.sendMessage(colorize("&6=== ДИАГНОСТИКА ==="));
+
+        if (mfIntegration.isEnabled()) {
+            player.sendMessage(colorize("&a✓ Medieval Factions подключен"));
+
+            // Запускаем отладку
+            mfIntegration.debugPlayers();
+
+            boolean inFaction = mfIntegration.isPlayerInFaction(player);
+            if (inFaction) {
+                String playerFactionId = mfIntegration.getPlayerFactionId(player);
+                String factionName = mfIntegration.getFactionName(playerFactionId);
+                boolean hasPermission = mfIntegration.hasCurrencyManagePermission(player);
+
+                player.sendMessage(colorize("&a✓ Вы состоите во фракции: &f" + factionName));
+                player.sendMessage(colorize("&7  ID фракции: &f" + playerFactionId));
+
+                if (hasPermission) {
+                    player.sendMessage(colorize("&a✓ У вас есть права на управление валютой"));
+                } else {
+                    player.sendMessage(colorize("&c✗ У вас нет прав на управление валютой"));
+                    player.sendMessage(colorize("&7  Попросите лидера выдать право CURRENCY_MANAGE"));
+                }
+            } else {
+                player.sendMessage(colorize("&c✗ Вы не состоите во фракции"));
+                player.sendMessage(colorize("&7  Создайте фракцию: &f/faction create <название>"));
+            }
+        } else {
+            player.sendMessage(colorize("&c✗ Medieval Factions не найден"));
+        }
+
+        player.sendMessage(colorize("&7Проверьте консоль для подробной отладки"));
     }
 
     private void showRequirements(Player player) {

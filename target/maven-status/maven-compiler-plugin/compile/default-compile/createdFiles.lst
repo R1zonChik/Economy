@@ -1,6 +1,7 @@
 xyz\moorus\economy\command\CreateCommandExecutor.class
 xyz\moorus\economy\command\CreateCurrencyCommand.class
 xyz\moorus\economy\main\CommandManager.class
+xyz\moorus\economy\integration\MedievalFactionsIntegration.class
 xyz\moorus\economy\command\WalletCommand.class
 xyz\moorus\economy\command\AdminCommand.class
 xyz\moorus\economy\command\EmitCommandExecutor.class

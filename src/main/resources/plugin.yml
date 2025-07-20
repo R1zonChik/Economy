@@ -184,6 +184,10 @@ permissions:
     description: Максимум 20 ордеров на бирже
     default: false
 
+  medievalfactions.currency.manage:
+    description: "Allows managing faction currency"
+    default: false
+
   economy.bourse.max.unlimited:
     description: Неограниченное количество ордеров на бирже
     default: false

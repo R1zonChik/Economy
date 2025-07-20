@@ -8,10 +8,23 @@ public class MedievalFactionsIntegration {
 
     private final Economy plugin;
     private boolean enabled = false;
+    private Object medievalFactionsPlugin;
+    private Object services;
 
     public MedievalFactionsIntegration(Economy plugin) {
         this.plugin = plugin;
-        this.enabled = Bukkit.getPluginManager().getPlugin("MedievalFactions") != null;
+        this.medievalFactionsPlugin = Bukkit.getPluginManager().getPlugin("MedievalFactions");
+        this.enabled = medievalFactionsPlugin != null;
+
+        if (enabled) {
+            try {
+                this.services = medievalFactionsPlugin.getClass().getMethod("getServices").invoke(medievalFactionsPlugin);
+                plugin.getLogger().info("Medieval Factions API успешно подключен!");
+            } catch (Exception e) {
+                plugin.getLogger().severe("Ошибка подключения к Medieval Factions API: " + e.getMessage());
+                this.enabled = false;
+            }
+        }
     }
 
     public boolean isEnabled() {
@@ -22,21 +35,31 @@ public class MedievalFactionsIntegration {
         if (!enabled) return null;
 
         try {
-            Object medievalFactions = Bukkit.getPluginManager().getPlugin("MedievalFactions");
-            Object services = medievalFactions.getClass().getMethod("getServices").invoke(medievalFactions);
+            // Получаем playerService
             Object playerService = services.getClass().getMethod("getPlayerService").invoke(services);
 
-            Class<?> mfPlayerIdClass = Class.forName("com.dansplugins.factionsystem.player.MfPlayerId");
-            Object playerId = mfPlayerIdClass.getMethod("fromBukkitPlayer", Player.class).invoke(null, player);
+            // Получаем все игроков и ищем нашего
+            Object players = playerService.getClass().getMethod("getPlayers").invoke(playerService);
 
-            Object mfPlayer = playerService.getClass().getMethod("getPlayer", mfPlayerIdClass).invoke(playerService, playerId);
+            // Проходим по всем игрокам
+            if (players instanceof Iterable) {
+                for (Object mfPlayer : (Iterable<?>) players) {
+                    // Получаем ID игрока
+                    Object playerId = mfPlayer.getClass().getMethod("getId").invoke(mfPlayer);
+                    Object playerUUID = playerId.getClass().getMethod("getValue").invoke(playerId);
 
-            if (mfPlayer != null) {
-                Object factionId = mfPlayer.getClass().getMethod("getFactionId").invoke(mfPlayer);
-                if (factionId != null) {
-                    return factionId.getClass().getMethod("getValue").invoke(factionId).toString();
+                    // Сравниваем UUID
+                    if (player.getUniqueId().equals(playerUUID)) {
+                        // Нашли игрока! Получаем ID фракции
+                        Object factionId = mfPlayer.getClass().getMethod("getFactionId").invoke(mfPlayer);
+                        if (factionId != null) {
+                            return factionId.getClass().getMethod("getValue").invoke(factionId).toString();
+                        }
+                        break;
+                    }
                 }
             }
+
         } catch (Exception e) {
             plugin.getLogger().warning("Ошибка получения ID фракции: " + e.getMessage());
         }
@@ -48,13 +71,13 @@ public class MedievalFactionsIntegration {
         if (!enabled || factionId == null) return null;
 
         try {
-            Object medievalFactions = Bukkit.getPluginManager().getPlugin("MedievalFactions");
-            Object services = medievalFactions.getClass().getMethod("getServices").invoke(medievalFactions);
             Object factionService = services.getClass().getMethod("getFactionService").invoke(services);
 
+            // Создаем MfFactionId
             Class<?> mfFactionIdClass = Class.forName("com.dansplugins.factionsystem.faction.MfFactionId");
             Object factionIdObj = mfFactionIdClass.getConstructor(String.class).newInstance(factionId);
 
+            // Получаем фракцию
             Object faction = factionService.getClass().getMethod("getFaction", mfFactionIdClass).invoke(factionService, factionIdObj);
 
             if (faction != null) {
@@ -64,40 +87,95 @@ public class MedievalFactionsIntegration {
             plugin.getLogger().warning("Ошибка получения названия фракции: " + e.getMessage());
         }
 
-        return null;
+        return "Unknown Faction";
     }
 
-    public boolean hasPermission(Player player, String permission) {
+    public boolean hasCurrencyManagePermission(Player player) {
         if (!enabled) return false;
 
         try {
-            Object medievalFactions = Bukkit.getPluginManager().getPlugin("MedievalFactions");
-            Object services = medievalFactions.getClass().getMethod("getServices").invoke(medievalFactions);
+            // Получаем playerService и factionService
             Object playerService = services.getClass().getMethod("getPlayerService").invoke(services);
             Object factionService = services.getClass().getMethod("getFactionService").invoke(services);
 
-            Class<?> mfPlayerIdClass = Class.forName("com.dansplugins.factionsystem.player.MfPlayerId");
-            Object playerId = mfPlayerIdClass.getMethod("fromBukkitPlayer", Player.class).invoke(null, player);
+            // Находим игрока
+            Object players = playerService.getClass().getMethod("getPlayers").invoke(playerService);
+            Object mfPlayer = null;
+            Object playerId = null;
 
-            Object mfPlayer = playerService.getClass().getMethod("getPlayer", mfPlayerIdClass).invoke(playerService, playerId);
+            if (players instanceof Iterable) {
+                for (Object player_obj : (Iterable<?>) players) {
+                    Object pid = player_obj.getClass().getMethod("getId").invoke(player_obj);
+                    Object playerUUID = pid.getClass().getMethod("getValue").invoke(pid);
 
-            if (mfPlayer != null) {
-                Object factionId = mfPlayer.getClass().getMethod("getFactionId").invoke(mfPlayer);
-                if (factionId != null) {
-                    Object faction = factionService.getClass().getMethod("getFaction", factionId.getClass()).invoke(factionService, factionId);
-                    if (faction != null) {
-                        Object permissions = medievalFactions.getClass().getMethod("getFactionPermissions").invoke(medievalFactions);
-                        Object currencyManagePermission = permissions.getClass().getMethod("getCurrencyManage").invoke(permissions);
-
-                        return (boolean) faction.getClass().getMethod("hasPermission",
-                                playerId.getClass(), currencyManagePermission.getClass()).invoke(faction, playerId, currencyManagePermission);
+                    if (player.getUniqueId().equals(playerUUID)) {
+                        mfPlayer = player_obj;
+                        playerId = pid;
+                        break;
                     }
                 }
             }
+
+            if (mfPlayer == null) return false;
+
+            // Получаем фракцию игрока
+            Object factionId = mfPlayer.getClass().getMethod("getFactionId").invoke(mfPlayer);
+            if (factionId == null) return false;
+
+            Object faction = factionService.getClass().getMethod("getFaction", factionId.getClass()).invoke(factionService, factionId);
+            if (faction == null) return false;
+
+            // Проверяем права на управление валютой
+            Object permissions = medievalFactionsPlugin.getClass().getMethod("getFactionPermissions").invoke(medievalFactionsPlugin);
+            Object currencyManagePermission = permissions.getClass().getMethod("getCurrencyManage").invoke(permissions);
+
+            return (boolean) faction.getClass().getMethod("hasPermission",
+                    playerId.getClass(), currencyManagePermission.getClass()).invoke(faction, playerId, currencyManagePermission);
+
         } catch (Exception e) {
             plugin.getLogger().warning("Ошибка проверки прав: " + e.getMessage());
+            e.printStackTrace();
         }
 
         return false;
+    }
+
+    public boolean isPlayerInFaction(Player player) {
+        String factionId = getPlayerFactionId(player);
+        boolean inFaction = factionId != null;
+
+        plugin.getLogger().info("Игрок " + player.getName() + " во фракции: " + inFaction + " (ID: " + factionId + ")");
+
+        return inFaction;
+    }
+
+    // Метод для отладки - показывает всех игроков в системе MF
+    public void debugPlayers() {
+        if (!enabled) return;
+
+        try {
+            Object playerService = services.getClass().getMethod("getPlayerService").invoke(services);
+            Object players = playerService.getClass().getMethod("getPlayers").invoke(playerService);
+
+            plugin.getLogger().info("=== ОТЛАДКА MEDIEVAL FACTIONS ===");
+
+            if (players instanceof Iterable) {
+                int count = 0;
+                for (Object mfPlayer : (Iterable<?>) players) {
+                    Object playerId = mfPlayer.getClass().getMethod("getId").invoke(mfPlayer);
+                    Object playerUUID = playerId.getClass().getMethod("getValue").invoke(playerId);
+                    Object factionId = mfPlayer.getClass().getMethod("getFactionId").invoke(mfPlayer);
+
+                    plugin.getLogger().info("Игрок #" + count + ": UUID=" + playerUUID + ", FactionID=" +
+                            (factionId != null ? factionId.getClass().getMethod("getValue").invoke(factionId) : "null"));
+                    count++;
+                }
+                plugin.getLogger().info("Всего игроков в MF: " + count);
+            }
+
+        } catch (Exception e) {
+            plugin.getLogger().severe("Ошибка отладки: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
 }
