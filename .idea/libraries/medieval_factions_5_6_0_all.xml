@@ -1,0 +1,9 @@
+<component name="libraryTable">
+  <library name="medieval-factions-5.6.0-all">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/src/main/resources/lib/medieval-factions-5.6.0-all.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>
