@@ -804,33 +804,31 @@ public class AuctionCommand implements Command, Listener {
                 .replace("{currency}", currency);
     }
 
-    // ИСПРАВЛЕНО: Добавляем метод для создания аукционного предмета
     private boolean addAuctionItem(String sellerName, ItemStack item, long price, String currency, String category) {
         Database database = Economy.getInstance().getDatabase();
 
-        try (Connection conn = database.getConnection()) {
-            String itemData = serializeItem(item);
-            if (itemData == null) return false;
+        String itemData = serializeItem(item);
+        if (itemData == null) return false;
 
-            int hoursToExpire = Economy.getInstance().getConfig().getInt("auction.expiration_hours", 72);
-            String sql = "INSERT INTO auction_items (seller_name, seller_uuid, item_data, price, currency, category, expires_at, is_sold) " +
-                    "VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+' || ? || ' hours'), 0)";
+        int hoursToExpire = Economy.getInstance().getConfig().getInt("auction.expiration_hours", 72);
 
-            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-                stmt.setString(1, sellerName);
-                stmt.setString(2, Bukkit.getPlayer(sellerName).getUniqueId().toString());
-                stmt.setString(3, itemData);
-                stmt.setLong(4, price);
-                stmt.setString(5, currency);
-                stmt.setString(6, category);
-                stmt.setInt(7, hoursToExpire);
+        // ИСПРАВЛЕНО: Используем метод из Database
+        int itemId = database.addAuctionItem(
+                sellerName,
+                Bukkit.getPlayer(sellerName).getUniqueId().toString(),
+                itemData,
+                currency,
+                price,
+                category, // ИСПРАВЛЕНО: Передаем категорию!
+                hoursToExpire
+        );
 
-                return stmt.executeUpdate() > 0;
-            }
-        } catch (SQLException e) {
-            Economy.getInstance().getLogger().severe("Ошибка добавления предмета на аукцион: " + e.getMessage());
-            return false;
+        if (itemId > 0) {
+            Economy.getInstance().getLogger().info("Предмет добавлен с ID: " + itemId + ", категория: " + category);
+            return true;
         }
+
+        return false;
     }
 
     // ИСПРАВЛЕНО: Улучшенная система лимитов

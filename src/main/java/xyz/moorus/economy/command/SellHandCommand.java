@@ -77,11 +77,13 @@ public class SellHandCommand implements Command {
             return;
         }
 
+        // ИСПРАВЛЕНО: Правильно определяем категорию
+        String category = determineItemCategory(itemInHand);
+
         // Сериализуем предмет
         String itemData = serializeItem(itemInHand);
-        String category = getItemCategory(itemInHand.getType());
 
-        // Добавляем на аукцион
+        // ИСПРАВЛЕНО: Используем правильный метод добавления
         int hoursToExpire = Economy.getInstance().getConfig().getInt("auction.expiration_hours", 72);
         int itemId = database.addAuctionItem(sender, player.getUniqueId().toString(),
                 itemData, currency, price, category, hoursToExpire);
@@ -90,19 +92,91 @@ public class SellHandCommand implements Command {
             // Убираем предмет из инвентаря
             player.getInventory().setItemInMainHand(null);
 
-            // ИСПРАВЛЕНО: ТОЛЬКО ОДНО СООБЩЕНИЕ с правильной заменой
+            // Логируем транзакцию
+            database.logTransaction(sender, null, currency, price,
+                    "AUCTION_SELL", "Item listed on auction: #" + itemId);
+
+            // ИСПРАВЛЕНО: Правильное сообщение
             String message = Economy.getInstance().getConfig().getString("messages.auction.item_listed", "&aПредмет выставлен на аукцион за {price} {currency}!");
             message = message.replace("{price}", String.format("%,d", price));
             message = message.replace("{currency}", currency);
             player.sendMessage(colorize(message));
 
-            // Дополнительная информация
             player.sendMessage(colorize("&7ID: " + itemId));
+            player.sendMessage(colorize("&7Категория: " + category)); // ОТЛАДКА
             player.sendMessage(colorize("&7Истекает через " + hoursToExpire + " часов"));
 
         } else {
             player.sendMessage(colorize("&cОшибка при выставлении предмета на аукцион!"));
         }
+    }
+
+    // ИСПРАВЛЕНО: Правильное определение категории
+    private String determineItemCategory(ItemStack item) {
+        Material material = item.getType();
+        String materialName = material.name().toLowerCase();
+
+        // COMBAT - Оружие и броня
+        if (materialName.contains("sword") || materialName.contains("bow") ||
+                materialName.contains("crossbow") || materialName.contains("trident") ||
+                materialName.contains("helmet") || materialName.contains("chestplate") ||
+                materialName.contains("leggings") || materialName.contains("boots") ||
+                materialName.contains("shield") || material == Material.ARROW) {
+            return "COMBAT";
+        }
+
+        // TOOLS - Инструменты
+        if (materialName.contains("pickaxe") || materialName.contains("axe") ||
+                materialName.contains("shovel") || materialName.contains("hoe") ||
+                materialName.contains("shears") || material == Material.FISHING_ROD) {
+            return "TOOLS";
+        }
+
+        // FOOD - Еда
+        if (material.isEdible() || materialName.contains("bread") ||
+                materialName.contains("cake") || materialName.contains("stew") ||
+                material == Material.MILK_BUCKET) {
+            return "FOOD";
+        }
+
+        // BUILDING_BLOCKS - Строительные блоки
+        if (material.isBlock() && (
+                materialName.contains("stone") || materialName.contains("brick") ||
+                        materialName.contains("wood") || materialName.contains("plank") ||
+                        materialName.contains("log") || materialName.contains("concrete") ||
+                        materialName.contains("wool") || materialName.contains("glass") ||
+                        material == Material.DIRT || material == Material.SAND)) {
+            return "BUILDING_BLOCKS";
+        }
+
+        // REDSTONE - Редстоун
+        if (materialName.contains("redstone") || materialName.contains("piston") ||
+                materialName.contains("repeater") || materialName.contains("comparator") ||
+                materialName.contains("lever") || materialName.contains("button") ||
+                material == Material.HOPPER || material == Material.DISPENSER) {
+            return "REDSTONE";
+        }
+
+        // TRANSPORTATION - Транспорт
+        if (materialName.contains("rail") || materialName.contains("cart") ||
+                materialName.contains("boat") || material == Material.SADDLE) {
+            return "TRANSPORTATION";
+        }
+
+        // BREWING - Зелья
+        if (materialName.contains("potion") || material == Material.BREWING_STAND ||
+                material == Material.CAULDRON || material == Material.BLAZE_POWDER) {
+            return "BREWING";
+        }
+
+        // DECORATIONS - Декорации
+        if (materialName.contains("painting") || materialName.contains("frame") ||
+                materialName.contains("flower") || materialName.contains("banner") ||
+                materialName.contains("carpet") || material == Material.FLOWER_POT) {
+            return "DECORATIONS";
+        }
+
+        return "MISCELLANEOUS";
     }
 
     private String replacePlaceholders(String message, long price, String currency) {

@@ -750,16 +750,19 @@ public class Database {
                               String currency, long price, String category, int hoursToExpire) {
         try (Connection connection = getConnection();
              PreparedStatement statement = connection.prepareStatement(
-                     "INSERT INTO auction_items (seller_name, seller_uuid, item_data, currency, price, category, expires_at) " +
-                             "VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+' || ? || ' hours'))",
+                     "INSERT INTO auction_items (seller_name, seller_uuid, item_data, currency, price, category, expires_at, is_sold) " +
+                             "VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+' || ? || ' hours'), 0)",
                      Statement.RETURN_GENERATED_KEYS)) {
+
             statement.setString(1, sellerName);
             statement.setString(2, sellerUuid);
             statement.setString(3, itemData);
             statement.setString(4, currency);
             statement.setLong(5, price);
-            statement.setString(6, category);
+            statement.setString(6, category); // ИСПРАВЛЕНО: Сохраняем категорию!
             statement.setInt(7, hoursToExpire);
+
+            plugin.getLogger().info("Добавляем предмет: категория=" + category + ", валюта=" + currency);
 
             int affectedRows = statement.executeUpdate();
             if (affectedRows > 0) {
@@ -770,6 +773,7 @@ public class Database {
             }
         } catch (SQLException e) {
             plugin.getLogger().severe("Ошибка при добавлении предмета на аукцион: " + e.getMessage());
+            e.printStackTrace();
         }
         return -1;
     }
