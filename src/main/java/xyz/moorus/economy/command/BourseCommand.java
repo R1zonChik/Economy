@@ -324,7 +324,9 @@ public class BourseCommand implements Command, Listener {
 
         String title = Economy.getInstance().getConfig().getString("bourse.gui.titles.trading_pair", "&6{currency1} → {currency2}")
                 .replace("{currency1}", currency1)
-                .replace("{currency2}", currency2);
+                .replace("{currency2}", currency2)
+                .replace("{sell_currency}", currency1)  // ДОБАВЛЕНО
+                .replace("{buy_currency}", currency2);  // ДОБАВЛЕНО
 
         Inventory ordersGui = Bukkit.createInventory(null, 54, colorize(title));
 
@@ -724,6 +726,36 @@ public class BourseCommand implements Command, Listener {
                 }
             }
         }
+    }
+
+    private void openCreateOrderGUI(Player player, String sellCurrency, String buyCurrency) {
+        Inventory gui = Bukkit.createInventory(null, 27, colorize("&6Создать ордер: " + sellCurrency + " → " + buyCurrency));
+
+        // Инструкция
+        ItemStack instruction = new ItemStack(Material.BOOK);
+        ItemMeta instructionMeta = instruction.getItemMeta();
+        instructionMeta.setDisplayName(colorize("&e&lИНСТРУКЦИЯ"));
+        instructionMeta.setLore(Arrays.asList(
+                colorize("&7Используйте команду:"),
+                colorize("&f/bourse add " + sellCurrency + " <кол-во> " + buyCurrency + " <кол-во>"),
+                colorize("&7"),
+                colorize("&7Пример:"),
+                colorize("&f/bourse add " + sellCurrency + " 100 " + buyCurrency + " 50")
+        ));
+        instruction.setItemMeta(instructionMeta);
+        gui.setItem(13, instruction);
+
+        // Кнопка назад
+        ItemStack backButton = new ItemStack(Material.ARROW);
+        ItemMeta backMeta = backButton.getItemMeta();
+        backMeta.setDisplayName(colorize("&cНазад"));
+        backButton.setItemMeta(backMeta);
+        gui.setItem(18, backButton);
+
+        player.openInventory(gui);
+        player.closeInventory(); // Закрываем сразу и показываем команду
+        player.sendMessage(colorize("&7Создание ордера для пары " + sellCurrency + "/" + buyCurrency + ":"));
+        player.sendMessage(colorize("&f/bourse add " + sellCurrency + " <количество> " + buyCurrency + " <количество>"));
     }
 
     private void handleMyOrdersClick(Player player, int slot, boolean leftClick, boolean rightClick, boolean shiftClick) {

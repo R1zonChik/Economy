@@ -274,7 +274,7 @@ bourse:
     size: 54
     titles:
       main: "&6Биржа валют"
-      trading_pair: "&6{sell_currency} → {buy_currency}"
+      trading_pair: "&6{currency1} → {currency2}"
       my_orders: "&6Мои ордера"
       popular_pairs: "&6Популярные пары"
 
