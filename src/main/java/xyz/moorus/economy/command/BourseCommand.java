@@ -30,6 +30,15 @@ public class BourseCommand implements Command, Listener {
     private Map<String, String> playerMenus = new HashMap<>();
     private Map<String, String[]> playerTradingPair = new HashMap<>();
     private Map<String, Integer> playerPages = new HashMap<>();
+    private int lastCreatedOrderId = 0;
+
+    public int getLastCreatedOrderId() {
+        return lastCreatedOrderId;
+    }
+
+    public void setLastCreatedOrderId(int id) {
+        this.lastCreatedOrderId = id;
+    }
 
     public BourseCommand() {
         Bukkit.getPluginManager().registerEvents(this, Economy.getInstance());
@@ -549,24 +558,17 @@ public class BourseCommand implements Command, Listener {
     public void onInventoryClick(InventoryClickEvent event) {
         if (!(event.getWhoClicked() instanceof Player)) return;
         Player player = (Player) event.getWhoClicked();
-
         String title = event.getView().getTitle();
 
-        // Проверяем что это наше меню
-        if (!isOurInventory(title)) {
+        // Простая проверка наших меню
+        if (!title.contains("→") && !title.contains("Биржа") && !title.contains("Мои ордера")) {
             return;
         }
 
         // ПОЛНАЯ БЛОКИРОВКА ВСЕХ ДЕЙСТВИЙ
         event.setCancelled(true);
 
-        // Блокируем Shift+Click из инвентаря игрока в наше меню
-        if (event.getClickedInventory() == event.getView().getBottomInventory() &&
-                event.isShiftClick()) {
-            return; // Блокируем shift+click из инвентаря игрока
-        }
-
-        // Проверяем что клик в верхнем инвентаре (наше меню)
+        // Проверяем что клик в верхнем инвентаре
         if (event.getClickedInventory() != event.getView().getTopInventory()) {
             return;
         }
@@ -575,29 +577,28 @@ public class BourseCommand implements Command, Listener {
         if (clickedItem == null || clickedItem.getType() == Material.AIR) return;
 
         int slot = event.getSlot();
-        String menuType = determineMenuType(title);
 
-        switch (menuType) {
-            case "bourse":
-                handleBourseMenuClick(player, slot, event.getClick());
-                break;
-            case "trading_pair":
-                handleTradingPairClick(player, slot, event.isLeftClick());
-                break;
-            case "my_orders":
-                handleMyOrdersClick(player, slot, event.isLeftClick(), event.isRightClick(), event.isShiftClick());
-                break;
+        // ПРЯМАЯ ОБРАБОТКА БЕЗ ОПРЕДЕЛЕНИЯ ТИПА
+        if (title.contains("→")) {
+            // Это меню торговой пары
+            handleTradingPairClick(player, slot, event.isLeftClick());
+        } else if (title.contains("Мои ордера")) {
+            // Это меню моих ордеров
+            handleMyOrdersClick(player, slot, event.isLeftClick(), event.isRightClick(), event.isShiftClick());
+        } else if (title.contains("Биржа")) {
+            // Это главное меню биржи
+            handleBourseMenuClick(player, slot, event.getClick());
         }
     }
 
     private String determineMenuType(String title) {
-        String cleanTitle = title.replace("§", "&");
+        String cleanTitle = title.replace("§", "").replace("&", "").toLowerCase();
 
-        if (cleanTitle.contains("Мои ордера")) {
+        if (cleanTitle.contains("мои ордера")) {
             return "my_orders";
-        } else if (cleanTitle.contains("→")) {
+        } else if (cleanTitle.contains("→") || cleanTitle.contains("->")) {
             return "trading_pair";
-        } else if (cleanTitle.contains("Биржа валют")) {
+        } else if (cleanTitle.contains("биржа валют")) {
             return "bourse";
         }
 
@@ -605,13 +606,16 @@ public class BourseCommand implements Command, Listener {
     }
 
     private boolean isOurInventory(String title) {
-        String cleanTitle = title.replace("§", "&");
-
-        return cleanTitle.contains("Биржа валют") ||
-                cleanTitle.contains("Мои ордера") ||
+        String cleanTitle = title.replace("§", "").replace("&", "").toLowerCase();
+        return cleanTitle.contains("биржа валют") ||
+                cleanTitle.contains("мои ордера") ||
                 cleanTitle.contains("→") ||
-                cleanTitle.contains("Bourse") ||
-                cleanTitle.contains("Orders");
+                cleanTitle.contains("->") ||
+                cleanTitle.contains("bourse") ||
+                cleanTitle.contains("orders") ||
+                cleanTitle.contains("vil") ||
+                cleanTitle.contains("abc") ||
+                cleanTitle.contains("создать ордер");
     }
 
     @EventHandler
@@ -688,25 +692,36 @@ public class BourseCommand implements Command, Listener {
     }
 
     private void handleTradingPairClick(Player player, int slot, boolean leftClick) {
+        // УБИРАЕМ ОТЛАДКУ И ДОБАВЛЯЕМ ПРЯМУЮ ОБРАБОТКУ
+
         if (slot == 45) { // Назад
             openBourseMenu(player);
-        } else if (slot == 49) { // Создать ордер
+            return;
+        }
+
+        if (slot == 49) { // Создать ордер
             String[] pair = playerTradingPair.get(player.getName());
             if (pair != null) {
                 player.closeInventory();
-                player.sendMessage(colorize("&6=== Создание ордера ==="));
+                player.sendMessage(colorize("&6=== СОЗДАНИЕ ОРДЕРА ==="));
                 player.sendMessage(colorize("&7Пара: &f" + pair[0] + " → " + pair[1]));
                 player.sendMessage(colorize("&7Команда: &f/bourse add " + pair[0] + " <кол-во> " + pair[1] + " <кол-во>"));
                 player.sendMessage(colorize("&7Пример: &f/bourse add " + pair[0] + " 100 " + pair[1] + " 50"));
                 player.sendMessage(colorize("&e"));
                 player.sendMessage(colorize("&7Это означает: продаю 100 " + pair[0] + ", покупаю 50 " + pair[1]));
             }
-        } else if (slot == 53) { // Обновить
+            return;
+        }
+
+        if (slot == 53) { // Обновить
             String[] pair = playerTradingPair.get(player.getName());
             if (pair != null) {
                 openTradingPairOrders(player, pair[0], pair[1]);
             }
-        } else if (slot < 45) { // Клик по ордеру
+            return;
+        }
+
+        if (slot < 45) { // Клик по ордеру
             Database database = Economy.getInstance().getDatabase();
             String[] pair = playerTradingPair.get(player.getName());
 
@@ -840,8 +855,13 @@ public class BourseCommand implements Command, Listener {
         BourseManager bourseManager = BourseManager.getInstance();
 
         if (bourseManager.addOrder(order)) {
+            // Получаем ID созданного ордера из базы данных
+            int createdOrderId = getLastInsertedOrderId(player.getName());
+            setLastCreatedOrderId(createdOrderId);
+
             double rate = (double) buyAmount / sellAmount;
-            String message = Economy.getInstance().getConfig().getString("messages.bourse.order_created", "&aОрдер создан успешно!");
+            String message = Economy.getInstance().getConfig().getString("messages.bourse.order_created", "&aОрдер создан успешно! ID: #{id}")
+                    .replace("{id}", String.valueOf(createdOrderId));
             player.sendMessage(colorize(message));
             player.sendMessage(colorize("&7Продаю: " + String.format("%,d", sellAmount) + " " + sellCurrency));
             player.sendMessage(colorize("&7Покупаю: " + String.format("%,d", buyAmount) + " " + buyCurrency));
@@ -855,6 +875,24 @@ public class BourseCommand implements Command, Listener {
         } else {
             player.sendMessage(colorize("&cОшибка при создании ордера!"));
         }
+    }
+
+    private int getLastInsertedOrderId(String playerName) {
+        Database database = Economy.getInstance().getDatabase();
+        try (Connection conn = database.getConnection()) {
+            String sql = "SELECT id FROM bourse_orders WHERE player_name = ? ORDER BY id DESC LIMIT 1";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setString(1, playerName);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        return rs.getInt("id");
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            Economy.getInstance().getLogger().severe("Ошибка получения ID ордера: " + e.getMessage());
+        }
+        return 0;
     }
 
     private void handleBuyOrder(Player player, String orderIdStr) {

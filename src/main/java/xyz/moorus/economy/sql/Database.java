@@ -778,6 +778,23 @@ public class Database {
         return -1;
     }
 
+    public int getLastInsertedOrderId(String playerName) {
+        try (Connection conn = getConnection()) {
+            String sql = "SELECT id FROM bourse_orders WHERE player_name = ? ORDER BY id DESC LIMIT 1";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setString(1, playerName);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        return rs.getInt("id");
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            Economy.getInstance().getLogger().severe("Ошибка получения ID ордера: " + e.getMessage());
+        }
+        return 0;
+    }
+
     // ИСПРАВЛЕНО: Правильная фильтрация предметов аукциона
     public List<Map<String, Object>> getAuctionItems(String category, String currency, int page, int itemsPerPage) {
         List<Map<String, Object>> items = new ArrayList<>();
