@@ -94,10 +94,13 @@ public class SellHandCommand implements Command {
             database.logTransaction(sender, null, currency, price,
                     "AUCTION_SELL", "Item listed on auction: #" + itemId);
 
-            String message = Economy.getInstance().getConfig().getString("messages.auction.item_listed", "&aПредмет выставлен на аукцион!");
+            // ИСПРАВЛЕНО: Используем сообщение из конфига с заменой плейсхолдеров
+            String message = Economy.getInstance().getConfig().getString("messages.auction.item_listed", "&aПредмет выставлен на аукцион за {price} {currency}!");
+            player.sendMessage(colorize(replacePlaceholders(message, price, currency)));
+            message = message.replace("{currency}", currency);
             player.sendMessage(colorize(message));
+
             player.sendMessage(colorize("&7ID: " + itemId));
-            player.sendMessage(colorize("&7Цена: " + price + " " + currency));
             player.sendMessage(colorize("&7Истекает через " + hoursToExpire + " часов"));
 
         } else {
@@ -105,13 +108,28 @@ public class SellHandCommand implements Command {
         }
     }
 
+    private String replacePlaceholders(String message, long price, String currency) {
+        return message
+                .replace("{price}", String.format("%,d", price))
+                .replace("{currency}", currency);
+    }
+
+    // ИСПРАВЛЕНО: Операторы получают 9999 предметов
     private int getMaxAuctionItems(Player player) {
-        if (player.hasPermission("economy.auction.max.unlimited")) return Integer.MAX_VALUE;
+        // ИСПРАВЛЕНО: Проверяем OP статус в первую очередь
+        if (player.isOp()) {
+            return 9999; // Операторы могут выставлять 9999 предметов
+        }
+
+        // Проверяем права по убыванию
+        if (player.hasPermission("economy.auction.max.unlimited")) return 9999;
         if (player.hasPermission("economy.auction.max.50")) return 50;
         if (player.hasPermission("economy.auction.max.25")) return 25;
         if (player.hasPermission("economy.auction.max.10")) return 10;
         if (player.hasPermission("economy.auction.max.5")) return 5;
         if (player.hasPermission("economy.auction.max.3")) return 3;
+
+        // Базовый лимит из конфига
         return Economy.getInstance().getConfig().getInt("auction.default_max_items", 1);
     }
 

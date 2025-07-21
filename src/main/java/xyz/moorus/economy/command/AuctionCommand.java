@@ -710,7 +710,7 @@ public class AuctionCommand implements Command, Listener {
         ItemStack item = player.getInventory().getItemInMainHand();
 
         if (item == null || item.getType() == Material.AIR) {
-            player.sendMessage(colorize(Economy.getInstance().getConfig().getString("messages.auction.take_item_in_hand", "&cВозьмите предмет в руку!")));
+            player.sendMessage(colorize("&cВозьмите предмет в руку!"));
             return;
         }
 
@@ -718,38 +718,51 @@ public class AuctionCommand implements Command, Listener {
             long price = Long.parseLong(priceStr);
 
             if (price <= 0) {
-                player.sendMessage(colorize(Economy.getInstance().getConfig().getString("messages.auction.invalid_price", "&cЦена должна быть больше 0!")));
+                player.sendMessage(colorize("&cЦена должна быть больше 0!"));
                 return;
             }
 
-            // ИСПРАВЛЕНО: Проверяем лимит предметов с учетом прав
+            // ИСПРАВЛЕНО: Проверяем существование валюты
+            Database database = Economy.getInstance().getDatabase();
+            if (!database.doesCurrencyExist(currency)) {
+                player.sendMessage(colorize("&cВалюта " + currency + " не существует!"));
+                return;
+            }
+
+            // ИСПРАВЛЕНО: Правильная проверка лимитов
             int maxItems = getMaxItemsForPlayer(player);
             int currentItems = getCurrentItemsCount(player.getName());
 
             if (currentItems >= maxItems) {
-                String message = Economy.getInstance().getConfig().getString("messages.auction.max_items_reached", "&cВы достигли лимита предметов на аукционе! ({max})");
-                player.sendMessage(colorize(message.replace("{max}", String.valueOf(maxItems))));
+                player.sendMessage(colorize("&cВы достигли лимита предметов на аукционе! (" + maxItems + ")"));
                 return;
             }
 
-            Database database = Economy.getInstance().getDatabase();
-
-            // ИСПРАВЛЕНО: Определяем правильную категорию
             String category = determineItemCategory(item);
 
-            // ИСПРАВЛЕНО: Используем правильный метод
             if (addAuctionItem(player.getName(), item, price, currency, category)) {
                 player.getInventory().setItemInMainHand(null);
+
+                // ИСПРАВЛЕНО: Используем сообщение из конфига с заменой плейсхолдеров
                 String message = Economy.getInstance().getConfig().getString("messages.auction.item_listed", "&aПредмет выставлен на аукцион за {price} {currency}!");
-                player.sendMessage(colorize(message.replace("{price}", String.valueOf(price)).replace("{currency}", currency)));
+                player.sendMessage(colorize(replacePlaceholders(message, price, currency)));
+                message = message.replace("{currency}", currency);
+                player.sendMessage(colorize(message));
+
                 player.sendMessage(colorize("&7Категория: &f" + category));
             } else {
                 player.sendMessage(colorize("&cОшибка при выставлении предмета!"));
             }
 
         } catch (NumberFormatException e) {
-            player.sendMessage(colorize(Economy.getInstance().getConfig().getString("messages.auction.invalid_price", "&cНеверная цена!")));
+            player.sendMessage(colorize("&cНеверная цена! Используйте только цифры."));
         }
+    }
+
+    private String replacePlaceholders(String message, long price, String currency) {
+        return message
+                .replace("{price}", String.format("%,d", price))
+                .replace("{currency}", currency);
     }
 
     // ИСПРАВЛЕНО: Добавляем метод для создания аукционного предмета
@@ -826,18 +839,21 @@ public class AuctionCommand implements Command, Listener {
         Database database = Economy.getInstance().getDatabase();
 
         try (Connection conn = database.getConnection()) {
+            // ИСПРАВЛЕНО: Правильный SQL запрос
             String sql = "SELECT COUNT(*) FROM auction_items WHERE seller_name = ? AND is_sold = 0 AND expires_at > datetime('now')";
             try (PreparedStatement stmt = conn.prepareStatement(sql)) {
                 stmt.setString(1, playerName);
 
                 try (ResultSet rs = stmt.executeQuery()) {
                     if (rs.next()) {
-                        return rs.getInt(1);
+                        int count = rs.getInt(1);
+                        Economy.getInstance().getLogger().info("Текущих предметов у " + playerName + ": " + count);
+                        return count;
                     }
                 }
             }
         } catch (SQLException e) {
-            // Игнорируем ошибки
+            Economy.getInstance().getLogger().severe("Ошибка подсчета предметов: " + e.getMessage());
         }
 
         return 0;
