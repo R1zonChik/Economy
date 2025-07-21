@@ -273,10 +273,33 @@ bourse:
   gui:
     size: 54
     titles:
-      main: "&6Биржа валют"
+      main: "&6§lБиржа валют"
       trading_pair: "&6{currency1} → {currency2}"
       my_orders: "&6Мои ордера"
       popular_pairs: "&6Популярные пары"
+      create_order: "&6Создать ордер: {currency1} → {currency2}"
+
+  # Настройки отображения ордеров
+  order_display:
+    order_lore:
+      - "&7Продавец: &f{seller}"
+      - "&7Продает: &e{sell_amount} {sell_currency}"
+      - "&7Покупает: &e{buy_amount} {buy_currency}"
+      - "&7Курс: &f{rate}"
+      - "&7За 1 {sell_currency} = {rate} {buy_currency}"
+      - ""
+      - "&aЛКМ - Купить"
+      - "&cПКМ - Подробнее"
+
+    my_order_lore:
+      - "&7Продаю: &e{sell_amount} {sell_currency}"
+      - "&7Покупаю: &e{buy_amount} {buy_currency}"
+      - "&7Курс: &f{rate}"
+      - "&7Статус: &aАктивен"
+      - ""
+      - "&cЛКМ - Отменить ордер"
+      - "&eПКМ - Подробная информация"
+      - "&7Shift+ЛКМ - Подтвердить отмену"
 
 # ====================================
 # НАСТРОЙКИ ПРЕМИУМ МАГАЗИНА

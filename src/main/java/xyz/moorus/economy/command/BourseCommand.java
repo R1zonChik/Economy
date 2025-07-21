@@ -322,11 +322,7 @@ public class BourseCommand implements Command, Listener {
         Database database = Economy.getInstance().getDatabase();
         List<Order> orders = database.getOrders(currency1, currency2);
 
-        String title = Economy.getInstance().getConfig().getString("bourse.gui.titles.trading_pair", "&6{currency1} → {currency2}")
-                .replace("{currency1}", currency1)
-                .replace("{currency2}", currency2)
-                .replace("{sell_currency}", currency1)  // ДОБАВЛЕНО
-                .replace("{buy_currency}", currency2);  // ДОБАВЛЕНО
+        String title = colorize("&6" + currency1 + " → " + currency2);
 
         Inventory ordersGui = Bukkit.createInventory(null, 54, colorize(title));
 
@@ -698,8 +694,12 @@ public class BourseCommand implements Command, Listener {
             String[] pair = playerTradingPair.get(player.getName());
             if (pair != null) {
                 player.closeInventory();
-                player.sendMessage(colorize("&7Создание ордера для пары " + pair[0] + "/" + pair[1] + ":"));
-                player.sendMessage(colorize("&f/bourse add " + pair[0] + " <количество> " + pair[1] + " <количество>"));
+                player.sendMessage(colorize("&6=== Создание ордера ==="));
+                player.sendMessage(colorize("&7Пара: &f" + pair[0] + " → " + pair[1]));
+                player.sendMessage(colorize("&7Команда: &f/bourse add " + pair[0] + " <кол-во> " + pair[1] + " <кол-во>"));
+                player.sendMessage(colorize("&7Пример: &f/bourse add " + pair[0] + " 100 " + pair[1] + " 50"));
+                player.sendMessage(colorize("&e"));
+                player.sendMessage(colorize("&7Это означает: продаю 100 " + pair[0] + ", покупаю 50 " + pair[1]));
             }
         } else if (slot == 53) { // Обновить
             String[] pair = playerTradingPair.get(player.getName());
@@ -726,36 +726,6 @@ public class BourseCommand implements Command, Listener {
                 }
             }
         }
-    }
-
-    private void openCreateOrderGUI(Player player, String sellCurrency, String buyCurrency) {
-        Inventory gui = Bukkit.createInventory(null, 27, colorize("&6Создать ордер: " + sellCurrency + " → " + buyCurrency));
-
-        // Инструкция
-        ItemStack instruction = new ItemStack(Material.BOOK);
-        ItemMeta instructionMeta = instruction.getItemMeta();
-        instructionMeta.setDisplayName(colorize("&e&lИНСТРУКЦИЯ"));
-        instructionMeta.setLore(Arrays.asList(
-                colorize("&7Используйте команду:"),
-                colorize("&f/bourse add " + sellCurrency + " <кол-во> " + buyCurrency + " <кол-во>"),
-                colorize("&7"),
-                colorize("&7Пример:"),
-                colorize("&f/bourse add " + sellCurrency + " 100 " + buyCurrency + " 50")
-        ));
-        instruction.setItemMeta(instructionMeta);
-        gui.setItem(13, instruction);
-
-        // Кнопка назад
-        ItemStack backButton = new ItemStack(Material.ARROW);
-        ItemMeta backMeta = backButton.getItemMeta();
-        backMeta.setDisplayName(colorize("&cНазад"));
-        backButton.setItemMeta(backMeta);
-        gui.setItem(18, backButton);
-
-        player.openInventory(gui);
-        player.closeInventory(); // Закрываем сразу и показываем команду
-        player.sendMessage(colorize("&7Создание ордера для пары " + sellCurrency + "/" + buyCurrency + ":"));
-        player.sendMessage(colorize("&f/bourse add " + sellCurrency + " <количество> " + buyCurrency + " <количество>"));
     }
 
     private void handleMyOrdersClick(Player player, int slot, boolean leftClick, boolean rightClick, boolean shiftClick) {
@@ -1084,5 +1054,36 @@ public class BourseCommand implements Command, Listener {
 
     private String colorize(String text) {
         return text.replace("&", "§");
+    }
+
+    private void openCreateOrderGUI(Player player, String sellCurrency, String buyCurrency) {
+        Inventory gui = Bukkit.createInventory(null, 27, colorize("&6Создать ордер: " + sellCurrency + " → " + buyCurrency));
+
+        // Инструкция
+        ItemStack instruction = new ItemStack(Material.BOOK);
+        ItemMeta instructionMeta = instruction.getItemMeta();
+        instructionMeta.setDisplayName(colorize("&e&lИНСТРУКЦИЯ"));
+        instructionMeta.setLore(Arrays.asList(
+                colorize("&7Используйте команду:"),
+                colorize("&f/bourse add " + sellCurrency + " <кол-во> " + buyCurrency + " <кол-во>"),
+                colorize("&7"),
+                colorize("&7Пример:"),
+                colorize("&f/bourse add " + sellCurrency + " 100 " + buyCurrency + " 50")
+        ));
+        instruction.setItemMeta(instructionMeta);
+        gui.setItem(13, instruction);
+
+        // Кнопка назад
+        ItemStack backButton = new ItemStack(Material.ARROW);
+        ItemMeta backMeta = backButton.getItemMeta();
+        backMeta.setDisplayName(colorize("&cНазад"));
+        backButton.setItemMeta(backMeta);
+        gui.setItem(18, backButton);
+
+        player.openInventory(gui);
+
+        // Показываем команду в чате
+        player.sendMessage(colorize("&7Создание ордера для пары " + sellCurrency + "/" + buyCurrency + ":"));
+        player.sendMessage(colorize("&f/bourse add " + sellCurrency + " <количество> " + buyCurrency + " <количество>"));
     }
 }
