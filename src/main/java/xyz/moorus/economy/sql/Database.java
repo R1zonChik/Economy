@@ -774,33 +774,33 @@ public class Database {
         return -1;
     }
 
-    // ИСПРАВЛЕНО: Метод получения предметов аукциона с правильной фильтрацией
+    // ИСПРАВЛЕНО: Правильная фильтрация предметов аукциона
     public List<Map<String, Object>> getAuctionItems(String category, String currency, int page, int itemsPerPage) {
         List<Map<String, Object>> items = new ArrayList<>();
 
         try (Connection conn = getConnection()) {
             StringBuilder sql = new StringBuilder("SELECT * FROM auction_items WHERE is_sold = 0 AND expires_at > datetime('now')");
-            List<String> params = new ArrayList<>();
+            List<Object> params = new ArrayList<>();
 
             // ИСПРАВЛЕНО: Правильная фильтрация по валюте
-            if (currency != null && !currency.equals("ALL")) {
-                sql.append(" AND currency = ?");
+            if (currency != null && !currency.equals("ALL") && !currency.isEmpty()) {
+                sql.append(" AND UPPER(currency) = UPPER(?)");
                 params.add(currency);
             }
 
             // ИСПРАВЛЕНО: Правильная фильтрация по категории
-            if (category != null && !category.equals("ALL")) {
-                sql.append(" AND category = ?");
+            if (category != null && !category.equals("ALL") && !category.isEmpty()) {
+                sql.append(" AND UPPER(category) = UPPER(?)");
                 params.add(category);
             }
 
             sql.append(" ORDER BY created_at DESC LIMIT ? OFFSET ?");
-            params.add(String.valueOf(itemsPerPage));
-            params.add(String.valueOf(page * itemsPerPage));
+            params.add(itemsPerPage);
+            params.add(page * itemsPerPage);
 
             try (PreparedStatement stmt = conn.prepareStatement(sql.toString())) {
                 for (int i = 0; i < params.size(); i++) {
-                    stmt.setString(i + 1, params.get(i));
+                    stmt.setObject(i + 1, params.get(i));
                 }
 
                 try (ResultSet rs = stmt.executeQuery()) {
@@ -820,6 +820,7 @@ public class Database {
             }
         } catch (SQLException e) {
             plugin.getLogger().severe("Ошибка получения предметов аукциона: " + e.getMessage());
+            e.printStackTrace();
         }
 
         return items;

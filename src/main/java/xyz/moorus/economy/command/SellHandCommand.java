@@ -90,16 +90,13 @@ public class SellHandCommand implements Command {
             // Убираем предмет из инвентаря
             player.getInventory().setItemInMainHand(null);
 
-            // Логируем транзакцию
-            database.logTransaction(sender, null, currency, price,
-                    "AUCTION_SELL", "Item listed on auction: #" + itemId);
-
-            // ИСПРАВЛЕНО: Используем сообщение из конфига с заменой плейсхолдеров
+            // ИСПРАВЛЕНО: ТОЛЬКО ОДНО СООБЩЕНИЕ с правильной заменой
             String message = Economy.getInstance().getConfig().getString("messages.auction.item_listed", "&aПредмет выставлен на аукцион за {price} {currency}!");
-            player.sendMessage(colorize(replacePlaceholders(message, price, currency)));
+            message = message.replace("{price}", String.format("%,d", price));
             message = message.replace("{currency}", currency);
             player.sendMessage(colorize(message));
 
+            // Дополнительная информация
             player.sendMessage(colorize("&7ID: " + itemId));
             player.sendMessage(colorize("&7Истекает через " + hoursToExpire + " часов"));
 

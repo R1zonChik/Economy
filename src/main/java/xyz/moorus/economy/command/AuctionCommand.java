@@ -233,11 +233,11 @@ public class AuctionCommand implements Command, Listener {
 
         Inventory inv = Bukkit.createInventory(null, 54, title);
 
-        // === КАТЕГОРИИ ===
+        // ИСПРАВЛЕНО: Правильные категории с иконками
         String[] categories = {"BUILDING_BLOCKS", "DECORATIONS", "REDSTONE", "TRANSPORTATION",
                 "MISCELLANEOUS", "FOOD", "TOOLS", "COMBAT", "BREWING"};
-        String[] categoryNames = {"§6Блоки", "§5Декорации", "§cРедстоун", "§9Транспорт",
-                "§7Разное", "§aЕда", "§eИнструменты", "§4Оружие", "§dЗелья"};
+        String[] categoryNames = {"&6Строительные блоки", "&5Декорации", "&cРедстоун", "&9Транспорт",
+                "&7Разное", "&aЕда", "&eИнструменты", "&4Оружие и броня", "&dЗелья"};
 
         for (int i = 0; i < categories.length && i < 45; i++) {
             ItemStack categoryItem = getCategoryIcon(categories[i]);
@@ -245,13 +245,13 @@ public class AuctionCommand implements Command, Listener {
             meta.setDisplayName(colorize(categoryNames[i]));
 
             List<String> lore = new ArrayList<>();
-            lore.add(colorize("&7Категория: " + categories[i]));
+            lore.add(colorize("&7Категория: &f" + categories[i]));
 
-            // Подсчитываем предметы в категории
+            // ИСПРАВЛЕНО: Правильный подсчет предметов в категории
             int itemCount = getItemCountInCategory(categories[i], selectedCurrency);
             lore.add(colorize("&7Предметов: &f" + itemCount));
 
-            if (selectedCurrency != null) {
+            if (selectedCurrency != null && !selectedCurrency.equals("ALL")) {
                 lore.add(colorize("&7Валюта: &f" + selectedCurrency));
                 if ("VIL".equals(selectedCurrency)) {
                     lore.add(colorize("&a§l★ ПРЕМИУМ КАТЕГОРИЯ ★"));
@@ -278,11 +278,19 @@ public class AuctionCommand implements Command, Listener {
         allMeta.setDisplayName(colorize("&b§lВСЕ КАТЕГОРИИ"));
         List<String> allLore = new ArrayList<>();
         allLore.add(colorize("&7Показать все предметы"));
-        if (selectedCurrency != null) {
+        if (selectedCurrency != null && !selectedCurrency.equals("ALL")) {
             allLore.add(colorize("&7Валюта: &f" + selectedCurrency));
         }
+
+        // Подсчитываем общее количество предметов
+        int totalItems = getItemCountInCategory("ALL", selectedCurrency);
+        allLore.add(colorize("&7Всего предметов: &f" + totalItems));
         allLore.add(colorize("&e"));
-        allLore.add(colorize("&aНажмите для просмотра"));
+        if (totalItems > 0) {
+            allLore.add(colorize("&aНажмите для просмотра"));
+        } else {
+            allLore.add(colorize("&7Предметов нет"));
+        }
         allMeta.setLore(allLore);
         allCategories.setItemMeta(allMeta);
         inv.setItem(49, allCategories);
@@ -628,8 +636,39 @@ public class AuctionCommand implements Command, Listener {
 
     private int getItemCountInCategory(String category, String currency) {
         Database database = Economy.getInstance().getDatabase();
-        List<Map<String, Object>> items = database.getAuctionItems(category, currency, 0, 1000);
-        return items.size();
+
+        try (Connection conn = database.getConnection()) {
+            StringBuilder sql = new StringBuilder("SELECT COUNT(*) FROM auction_items WHERE is_sold = 0 AND expires_at > datetime('now')");
+            List<Object> params = new ArrayList<>();
+
+            // Фильтр по валюте
+            if (currency != null && !currency.equals("ALL") && !currency.isEmpty()) {
+                sql.append(" AND UPPER(currency) = UPPER(?)");
+                params.add(currency);
+            }
+
+            // Фильтр по категории
+            if (category != null && !category.equals("ALL") && !category.isEmpty()) {
+                sql.append(" AND UPPER(category) = UPPER(?)");
+                params.add(category);
+            }
+
+            try (PreparedStatement stmt = conn.prepareStatement(sql.toString())) {
+                for (int i = 0; i < params.size(); i++) {
+                    stmt.setObject(i + 1, params.get(i));
+                }
+
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        return rs.getInt(1);
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            Economy.getInstance().getLogger().severe("Ошибка подсчета предметов в категории: " + e.getMessage());
+        }
+
+        return 0;
     }
 
     private ItemStack createAuctionItemDisplay(Map<String, Object> item) {
@@ -743,9 +782,9 @@ public class AuctionCommand implements Command, Listener {
             if (addAuctionItem(player.getName(), item, price, currency, category)) {
                 player.getInventory().setItemInMainHand(null);
 
-                // ИСПРАВЛЕНО: Используем сообщение из конфига с заменой плейсхолдеров
+                // ИСПРАВЛЕНО: ТОЛЬКО ОДНО СООБЩЕНИЕ
                 String message = Economy.getInstance().getConfig().getString("messages.auction.item_listed", "&aПредмет выставлен на аукцион за {price} {currency}!");
-                player.sendMessage(colorize(replacePlaceholders(message, price, currency)));
+                message = message.replace("{price}", String.format("%,d", price));
                 message = message.replace("{currency}", currency);
                 player.sendMessage(colorize(message));
 
@@ -861,60 +900,89 @@ public class AuctionCommand implements Command, Listener {
 
     private String determineItemCategory(ItemStack item) {
         Material material = item.getType();
-        String materialName = material.name();
+        String materialName = material.name().toLowerCase();
 
         // ИСПРАВЛЕНО: Правильное определение категорий
-        if (materialName.contains("BLOCK") || materialName.contains("BRICK") ||
-                materialName.contains("STONE") || materialName.contains("WOOD") ||
-                materialName.contains("PLANK") || materialName.contains("LOG") ||
-                material == Material.COBBLESTONE || material == Material.DIRT ||
-                material == Material.SAND || material == Material.GRAVEL) {
-            return "BUILDING_BLOCKS";
-        }
 
-        if (materialName.contains("SWORD") || materialName.contains("BOW") ||
-                materialName.contains("ARMOR") || materialName.contains("HELMET") ||
-                materialName.contains("CHESTPLATE") || materialName.contains("LEGGINGS") ||
-                materialName.contains("BOOTS") || materialName.contains("SHIELD")) {
+        // COMBAT - Оружие и броня
+        if (materialName.contains("sword") || materialName.contains("bow") ||
+                materialName.contains("crossbow") || materialName.contains("trident") ||
+                materialName.contains("helmet") || materialName.contains("chestplate") ||
+                materialName.contains("leggings") || materialName.contains("boots") ||
+                materialName.contains("shield") || material == Material.ARROW ||
+                material == Material.SPECTRAL_ARROW || material == Material.TIPPED_ARROW) {
             return "COMBAT";
         }
 
-        if (materialName.contains("PICKAXE") || materialName.contains("AXE") ||
-                materialName.contains("SHOVEL") || materialName.contains("HOE") ||
-                materialName.contains("SHEARS") || material == Material.FISHING_ROD) {
+        // TOOLS - Инструменты
+        if (materialName.contains("pickaxe") || materialName.contains("axe") ||
+                materialName.contains("shovel") || materialName.contains("hoe") ||
+                materialName.contains("shears") || material == Material.FISHING_ROD ||
+                material == Material.FLINT_AND_STEEL || material == Material.COMPASS ||
+                material == Material.CLOCK || material == Material.SPYGLASS) {
             return "TOOLS";
         }
 
-        if (materialName.contains("FOOD") || material.isEdible() ||
-                materialName.contains("BREAD") || materialName.contains("MEAT") ||
-                materialName.contains("FISH") || materialName.contains("APPLE") ||
-                materialName.contains("CARROT") || materialName.contains("POTATO")) {
+        // FOOD - Еда
+        if (material.isEdible() ||
+                materialName.contains("bread") || materialName.contains("cake") ||
+                materialName.contains("pie") || materialName.contains("stew") ||
+                materialName.contains("soup") || material == Material.MILK_BUCKET ||
+                material == Material.HONEY_BOTTLE || material == Material.SUSPICIOUS_STEW) {
             return "FOOD";
         }
 
-        if (materialName.contains("POTION") || materialName.contains("BREWING") ||
-                material == Material.BREWING_STAND || material == Material.CAULDRON) {
-            return "BREWING";
+        // BUILDING_BLOCKS - Строительные блоки
+        if (material.isBlock() && (
+                materialName.contains("stone") || materialName.contains("brick") ||
+                        materialName.contains("wood") || materialName.contains("plank") ||
+                        materialName.contains("log") || materialName.contains("cobblestone") ||
+                        materialName.contains("concrete") || materialName.contains("terracotta") ||
+                        materialName.contains("wool") || materialName.contains("glass") ||
+                        material == Material.DIRT || material == Material.SAND ||
+                        material == Material.GRAVEL || material == Material.CLAY ||
+                        materialName.contains("stairs") || materialName.contains("slab"))) {
+            return "BUILDING_BLOCKS";
         }
 
-        if (materialName.contains("RAIL") || materialName.contains("CART") ||
-                materialName.contains("BOAT") || material == Material.SADDLE) {
-            return "TRANSPORTATION";
-        }
-
-        if (materialName.contains("REDSTONE") || materialName.contains("PISTON") ||
-                materialName.contains("REPEATER") || materialName.contains("COMPARATOR") ||
-                materialName.contains("LEVER") || materialName.contains("BUTTON")) {
+        // REDSTONE - Редстоун механизмы
+        if (materialName.contains("redstone") || materialName.contains("piston") ||
+                materialName.contains("repeater") || materialName.contains("comparator") ||
+                materialName.contains("lever") || materialName.contains("button") ||
+                materialName.contains("pressure_plate") || materialName.contains("tripwire") ||
+                material == Material.OBSERVER || material == Material.HOPPER ||
+                material == Material.DROPPER || material == Material.DISPENSER) {
             return "REDSTONE";
         }
 
-        if (materialName.contains("PAINTING") || materialName.contains("FRAME") ||
-                materialName.contains("FLOWER") || materialName.contains("BANNER") ||
-                // ИСПРАВЛЕНО: Заменяем CARPET на WHITE_CARPET
-                material == Material.WHITE_CARPET || materialName.contains("WOOL")) {
+        // TRANSPORTATION - Транспорт
+        if (materialName.contains("rail") || materialName.contains("cart") ||
+                materialName.contains("boat") || material == Material.SADDLE ||
+                material == Material.DIAMOND_HORSE_ARMOR || materialName.contains("horse_armor") ||
+                material == Material.LEAD || material == Material.NAME_TAG) {
+            return "TRANSPORTATION";
+        }
+
+        // BREWING - Зелья и алхимия
+        if (materialName.contains("potion") || material == Material.BREWING_STAND ||
+                material == Material.CAULDRON || material == Material.BLAZE_POWDER ||
+                material == Material.NETHER_WART || material == Material.FERMENTED_SPIDER_EYE ||
+                material == Material.GLISTERING_MELON_SLICE || material == Material.GOLDEN_CARROT ||
+                materialName.contains("spider_eye") || materialName.contains("ghast_tear")) {
+            return "BREWING";
+        }
+
+        // DECORATIONS - Декорации
+        if (materialName.contains("painting") || materialName.contains("frame") ||
+                materialName.contains("flower") || materialName.contains("banner") ||
+                materialName.contains("carpet") || materialName.contains("candle") ||
+                material == Material.FLOWER_POT || material == Material.BEACON ||
+                materialName.contains("head") || materialName.contains("skull") ||
+                material == Material.ARMOR_STAND || materialName.contains("sign")) {
             return "DECORATIONS";
         }
 
+        // Все остальное
         return "MISCELLANEOUS";
     }
 
