@@ -28,6 +28,45 @@ database:
     max_lifetime: 1800000
 
 # ====================================
+# НАСТРОЙКИ MEDIEVAL FACTIONS
+# ====================================
+medieval_factions:
+  # Включить интеграцию с Medieval Factions
+  enabled: true
+
+  # Настройки базы данных Medieval Factions
+  database:
+    # Тип базы данных MF (h2, sqlite, mysql)
+    type: "h2"
+
+    # URL подключения к H2 (из конфига MF)
+    url: "jdbc:h2:./medieval_factions_db;AUTO_SERVER=true;MODE=MYSQL;DATABASE_TO_UPPER=false"
+
+    # Диалект базы данных
+    dialect: "H2"
+
+    # Логин и пароль
+    username: "sa"
+    password: ""
+
+    # Альтернативные настройки для других типов БД
+    sqlite:
+      path: "plugins/MedievalFactions/database.db"
+
+    mysql:
+      host: "localhost"
+      port: 3306
+      database: "medievalfactions"
+      username: "root"
+      password: ""
+
+  # Право на управление валютой
+  currency_permission: "CURRENCY_MANAGE"
+
+  # Разрешить создание валют без фракции (для тестирования)
+  allow_without_faction: true
+
+# ====================================
 # НАСТРОЙКИ ВАЛЮТ
 # ====================================
 currencies:
@@ -118,6 +157,25 @@ auction:
   # Максимальная цена предмета
   max_price: 1000000000
 
+  # Настройки прав для лимитов предметов
+  permissions:
+    # Неограниченное количество предметов
+    unlimited: "economy.auction.max.unlimited"
+    # VIP лимит (50 предметов)
+    vip: "economy.auction.max.50"
+    # Премиум лимит (25 предметов)
+    premium: "economy.auction.max.25"
+    # Обычный лимит (10 предметов)
+    normal: "economy.auction.max.10"
+
+  # Лимиты по группам (если права не работают)
+  limits:
+    default: 10
+    vip: 50
+    premium: 25
+    admin: 999
+    op: 999
+
   # Настройки GUI
   gui:
     size: 54
@@ -126,6 +184,7 @@ auction:
       currency_selection: "&6Аукцион - {currency}"
       items: "&6Предметы - {category}"
       expired: "&cИстекшие предметы"
+      active: "&aАктивные лоты"
       premium: "&6⭐ ПРЕМИУМ МАГАЗИН ⭐"
 
   # Категории предметов
@@ -179,8 +238,8 @@ auction:
 # НАСТРОЙКИ БИРЖИ
 # ====================================
 bourse:
-  # Максимальное количество ордеров на игрока
-  max_orders_per_player: 5
+  # Максимальное количество ордеров на игрока по умолчанию
+  default_max_orders: 3
 
   # Минимальная сумма ордера
   min_order_amount: 1
@@ -191,6 +250,25 @@ bourse:
   # Комиссия биржи (в процентах)
   commission_rate: 0.01
 
+  # Настройки прав для лимитов ордеров
+  permissions:
+    # Неограниченное количество ордеров
+    unlimited: "economy.bourse.max.unlimited"
+    # VIP лимит (20 ордеров)
+    vip: "economy.bourse.max.20"
+    # Премиум лимит (15 ордеров)
+    premium: "economy.bourse.max.15"
+    # Обычный лимит (5 ордеров)
+    normal: "economy.bourse.max.5"
+
+  # Лимиты по группам
+  limits:
+    default: 3
+    vip: 20
+    premium: 15
+    admin: 999
+    op: 999
+
   # Настройки GUI
   gui:
     size: 54
@@ -198,6 +276,7 @@ bourse:
       main: "&6Биржа валют"
       trading_pair: "&6{sell_currency} → {buy_currency}"
       my_orders: "&6Мои ордера"
+      popular_pairs: "&6Популярные пары"
 
 # ====================================
 # НАСТРОЙКИ ПРЕМИУМ МАГАЗИНА
@@ -237,12 +316,6 @@ limits:
 # НАСТРОЙКИ ИНТЕГРАЦИИ
 # ====================================
 integration:
-  # Medieval Factions
-  medieval_factions:
-    enabled: true
-    currency_permission: "CURRENCY_MANAGE"
-    auto_create_temp_faction: true
-
   # PlaceholderAPI
   placeholderapi:
     enabled: true
@@ -280,6 +353,8 @@ messages:
     faction_already_has_currency: "&cВаша фракция уже имеет валюту!"
     no_faction: "&cВы должны состоять во фракции для создания валюты!"
     no_faction_permission: "&cУ вас нет прав на создание валюты во фракции!"
+    mf_not_found: "&cMedieval Factions не найден!"
+    mf_database_error: "&cОшибка подключения к базе данных Medieval Factions!"
 
   # Сообщения кошелька
   wallet:
@@ -310,10 +385,13 @@ messages:
     item_returned: "&aПредмет возвращен в ваш инвентарь!"
     max_items_reached: "&cВы достигли лимита предметов на аукционе! ({max})"
     item_listed: "&aПредмет выставлен на аукцион за {price} {currency}!"
+    item_cancelled: "&aЛот отменен и предмет возвращен!"
     take_item_in_hand: "&cВозьмите предмет в руку!"
     invalid_price: "&cЦена должна быть больше 0!"
     cannot_buy_own_item: "&cВы не можете купить свой предмет!"
     item_already_sold: "&cПредмет уже продан!"
+    no_active_items: "&7У вас нет активных лотов"
+    no_expired_items: "&7У вас нет истекших предметов"
 
   # Сообщения биржи
   bourse:
@@ -328,6 +406,8 @@ messages:
     cannot_buy_own_order: "&cВы не можете купить свой собственный ордер!"
     no_orders: "&7У вас нет активных ордеров"
     order_partially_filled: "&aОрдер #{id} частично исполнен!"
+    no_popular_pairs: "&7Популярных пар пока нет"
+    usage_hint: "&7Создавайте ордера для обмена валют"
 
   # Сообщения эмиссии
   emission:
@@ -365,6 +445,9 @@ performance:
   # Пакетная обработка транзакций
   batch_transactions: true
   batch_size: 100
+
+  # Размер пула соединений с БД
+  database_pool_size: 10
 
 # ====================================
 # НАСТРОЙКИ ОЧИСТКИ

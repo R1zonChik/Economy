@@ -119,84 +119,199 @@ public class BourseCommand implements Command, Listener {
 
         Inventory inv = Bukkit.createInventory(null, 54, colorize("&6§lБиржа валют"));
 
-        // Получаем все существующие валюты (кроме VIL)
-        Set<String> currencies = new HashSet<>();
-        Database database = Economy.getInstance().getDatabase();
+        // ПОПУЛЯРНЫЕ ВАЛЮТНЫЕ ПАРЫ
+        List<String> popularPairs = getPopularCurrencyPairs();
 
-        // Добавляем валюты из базы данных
-        try (Connection connection = database.getConnection();
-             PreparedStatement stmt = connection.prepareStatement("SELECT DISTINCT currency_name FROM currencies WHERE currency_name != 'VIL'")) {
-            ResultSet rs = stmt.executeQuery();
-            while (rs.next()) {
-                currencies.add(rs.getString("currency_name"));
-            }
-        } catch (SQLException e) {
-            Economy.getInstance().getLogger().severe("Ошибка получения валют: " + e.getMessage());
-        }
+        int slot = 10;
+        for (String pair : popularPairs) {
+            if (slot >= 17) break;
 
-        // Добавляем валюты из кошельков игроков
-        try (Connection connection = database.getConnection();
-             PreparedStatement stmt = connection.prepareStatement("SELECT DISTINCT currency FROM player_wallets WHERE currency != 'VIL'")) {
-            ResultSet rs = stmt.executeQuery();
-            while (rs.next()) {
-                currencies.add(rs.getString("currency"));
-            }
-        } catch (SQLException e) {
-            Economy.getInstance().getLogger().severe("Ошибка получения валют из кошельков: " + e.getMessage());
-        }
-
-        int slot = 0;
-
-        // Создаем пары валют (не включая VIL)
-        for (String currency1 : currencies) {
-            for (String currency2 : currencies) {
-                if (!currency1.equals(currency2) && slot < 45) {
-                    ItemStack item = new ItemStack(Material.GOLD_INGOT);
-                    ItemMeta meta = item.getItemMeta();
-                    meta.setDisplayName(colorize("&6" + currency1 + " ⇄ " + currency2));
-
-                    List<String> lore = new ArrayList<>();
-                    lore.add(colorize("&7Торговая пара: &f" + currency1 + " → " + currency2));
-                    lore.add(colorize("&7Активных ордеров: &f" + database.getOrders(currency1, currency2).size()));
-                    lore.add(colorize("&e"));
-                    lore.add(colorize("&aЛКМ - Просмотреть ордера"));
-                    lore.add(colorize("&aПКМ - Создать ордер"));
-
-                    meta.setLore(lore);
-                    item.setItemMeta(meta);
-
-                    inv.setItem(slot, item);
-                    slot++;
-                }
+            String[] currencies = pair.split("/");
+            if (currencies.length == 2) {
+                ItemStack pairItem = createCurrencyPairItem(currencies[0], currencies[1]);
+                inv.setItem(slot, pairItem);
+                slot++;
             }
         }
 
-        // Кнопка "Мои ордера"
+        // Мои ордера
         ItemStack myOrders = new ItemStack(Material.BOOK);
         ItemMeta myOrdersMeta = myOrders.getItemMeta();
         myOrdersMeta.setDisplayName(colorize("&b§lМои ордера"));
         List<String> myOrdersLore = new ArrayList<>();
         myOrdersLore.add(colorize("&7Просмотр ваших активных ордеров"));
-        myOrdersLore.add(colorize("&7Активных ордеров: &f" + database.getPlayerOrderCount(player.getName())));
+        myOrdersLore.add(colorize("&7Активных ордеров: &f" + getPlayerOrderCount(player.getName())));
         myOrdersLore.add(colorize("&e"));
         myOrdersLore.add(colorize("&aНажмите для просмотра"));
         myOrdersMeta.setLore(myOrdersLore);
         myOrders.setItemMeta(myOrdersMeta);
-        inv.setItem(49, myOrders);
+        inv.setItem(22, myOrders);
 
-        // Заполняем пустые слоты стеклом
-        ItemStack glass = new ItemStack(Material.GRAY_STAINED_GLASS_PANE);
-        ItemMeta glassMeta = glass.getItemMeta();
-        glassMeta.setDisplayName(" ");
-        glass.setItemMeta(glassMeta);
+        // Все валютные пары
+        ItemStack allPairs = new ItemStack(Material.GOLD_INGOT);
+        ItemMeta allPairsMeta = allPairs.getItemMeta();
+        allPairsMeta.setDisplayName(colorize("&6Все валютные пары"));
+        allPairsMeta.setLore(Arrays.asList(
+                colorize("&7Посмотреть все доступные пары"),
+                colorize("&e"),
+                colorize("&eНажмите для просмотра")
+        ));
+        allPairs.setItemMeta(allPairsMeta);
+        inv.setItem(31, allPairs);
 
-        for (int i = 45; i < 54; i++) {
-            if (inv.getItem(i) == null) {
-                inv.setItem(i, glass);
-            }
-        }
+        // ПОДСКАЗКИ ПО ИСПОЛЬЗОВАНИЮ
+        addBourseHelp(inv);
 
         player.openInventory(inv);
+    }
+
+    private void addBourseHelp(Inventory gui) {
+        // Подсказка по использованию
+        ItemStack help = new ItemStack(Material.PAPER);
+        ItemMeta helpMeta = help.getItemMeta();
+        helpMeta.setDisplayName(colorize("&a📖 Как пользоваться биржей"));
+        helpMeta.setLore(Arrays.asList(
+                colorize("&7"),
+                colorize("&e🔸 Создание ордера на продажу:"),
+                colorize("&f/bourse add <продаю> <кол-во> <покупаю> <кол-во>"),
+                colorize("&7Пример: /bourse add VIL 100 ABC 50"),
+                colorize("&7"),
+                colorize("&e🔸 Покупка по ордеру:"),
+                colorize("&f/bourse buy <ID>"),
+                colorize("&7"),
+                colorize("&e🔸 Отмена ордера:"),
+                colorize("&f/bourse cancel <ID>"),
+                colorize("&7"),
+                colorize("&e🔸 Мои ордера:"),
+                colorize("&f/bourse my"),
+                colorize("&7"),
+                colorize("&c⚠ Комиссия биржи: 1%")
+        ));
+        help.setItemMeta(helpMeta);
+        gui.setItem(49, help);
+    }
+
+    private List<String> getPopularCurrencyPairs() {
+        List<String> pairs = new ArrayList<>();
+        Database database = Economy.getInstance().getDatabase();
+
+        try (Connection conn = database.getConnection()) {
+            // Получаем самые популярные пары по количеству ордеров
+            String sql = "SELECT sell_currency, buy_currency, COUNT(*) as order_count " +
+                    "FROM bourse_orders WHERE status = 'ACTIVE' " +
+                    "GROUP BY sell_currency, buy_currency " +
+                    "ORDER BY order_count DESC LIMIT 6";
+
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                try (ResultSet rs = stmt.executeQuery()) {
+                    while (rs.next()) {
+                        String sellCurrency = rs.getString("sell_currency");
+                        String buyCurrency = rs.getString("buy_currency");
+                        pairs.add(sellCurrency + "/" + buyCurrency);
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            Economy.getInstance().getLogger().warning("Ошибка получения популярных пар: " + e.getMessage());
+        }
+
+        // Если нет популярных пар, добавляем базовые
+        if (pairs.isEmpty()) {
+            pairs.add("VIL/ABC");
+            pairs.add("ABC/VIL");
+            pairs.add("VIL/XYZ");
+            pairs.add("XYZ/VIL");
+        }
+
+        return pairs;
+    }
+
+    private ItemStack createCurrencyPairItem(String sellCurrency, String buyCurrency) {
+        ItemStack item = new ItemStack(Material.GOLD_NUGGET);
+        ItemMeta meta = item.getItemMeta();
+        meta.setDisplayName(colorize("&6" + sellCurrency + " → " + buyCurrency));
+
+        // Получаем статистику по паре
+        int activeOrders = getActiveOrdersCount(sellCurrency, buyCurrency);
+        double bestRate = getBestExchangeRate(sellCurrency, buyCurrency);
+
+        List<String> lore = new ArrayList<>();
+        lore.add(colorize("&7Валютная пара: &f" + sellCurrency + "/" + buyCurrency));
+        lore.add(colorize("&7Активных ордеров: &e" + activeOrders));
+        if (bestRate > 0) {
+            lore.add(colorize("&7Лучший курс: &a" + String.format("%.4f", bestRate)));
+        }
+        lore.add(colorize("&e"));
+        lore.add(colorize("&eНажмите для просмотра ордеров"));
+
+        meta.setLore(lore);
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    private int getActiveOrdersCount(String sellCurrency, String buyCurrency) {
+        Database database = Economy.getInstance().getDatabase();
+
+        try (Connection conn = database.getConnection()) {
+            String sql = "SELECT COUNT(*) FROM bourse_orders WHERE sell_currency = ? AND buy_currency = ? AND status = 'ACTIVE'";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setString(1, sellCurrency);
+                stmt.setString(2, buyCurrency);
+
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        return rs.getInt(1);
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            // Игнорируем ошибки
+        }
+
+        return 0;
+    }
+
+    private double getBestExchangeRate(String sellCurrency, String buyCurrency) {
+        Database database = Economy.getInstance().getDatabase();
+
+        try (Connection conn = database.getConnection()) {
+            String sql = "SELECT MIN(buy_amount / sell_amount) FROM bourse_orders WHERE sell_currency = ? AND buy_currency = ? AND status = 'ACTIVE'";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setString(1, sellCurrency);
+                stmt.setString(2, buyCurrency);
+
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        return rs.getDouble(1);
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            // Игнорируем ошибки
+        }
+
+        return 0.0;
+    }
+
+    private int getPlayerOrderCount(String playerName) {
+        Database database = Economy.getInstance().getDatabase();
+
+        try (Connection conn = database.getConnection()) {
+            String sql = "SELECT COUNT(*) FROM bourse_orders WHERE player_name = ? AND status = 'ACTIVE'";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setString(1, playerName);
+
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        return rs.getInt(1);
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            // Игнорируем ошибки
+        }
+
+        return 0;
     }
 
     private void openTradingPairOrders(Player player, String currency1, String currency2) {
@@ -528,25 +643,50 @@ public class BourseCommand implements Command, Listener {
     }
 
     private void handleBourseMenuClick(Player player, int slot, ClickType clickType) {
-        if (slot == 49) { // Мои ордера
+        if (slot == 22) { // Мои ордера
             openMyOrdersMenu(player, 0);
-        } else if (slot < 45) { // Клик по торговой паре
+        } else if (slot >= 10 && slot <= 16) { // Популярные пары
             ItemStack clicked = player.getOpenInventory().getTopInventory().getItem(slot);
-            if (clicked != null && clicked.getType() == Material.GOLD_INGOT) {
+            if (clicked != null && clicked.getType() == Material.GOLD_NUGGET) {
                 String displayName = clicked.getItemMeta().getDisplayName();
-                String[] currencies = displayName.replace("§6", "").split(" ⇄ ");
+                String[] currencies = displayName.replace("§6", "").split(" → ");
 
                 if (currencies.length == 2) {
-                    if (clickType == ClickType.LEFT) {
-                        openTradingPairOrders(player, currencies[0], currencies[1]);
-                    } else if (clickType == ClickType.RIGHT) {
-                        player.closeInventory();
-                        player.sendMessage(colorize("&7Создание ордера для пары " + currencies[0] + "/" + currencies[1] + ":"));
-                        player.sendMessage(colorize("&f/bourse add " + currencies[0] + " <количество> " + currencies[1] + " <количество>"));
+                    openTradingPairOrders(player, currencies[0], currencies[1]);
+                }
+            }
+        } else if (slot == 31) { // Все валютные пары
+            showAllCurrencyPairs(player);
+        }
+    }
+
+    private void showAllCurrencyPairs(Player player) {
+        Database database = Economy.getInstance().getDatabase();
+
+        // Получаем все валюты
+        Set<String> currencies = new HashSet<>();
+        try (Connection connection = database.getConnection();
+             PreparedStatement stmt = connection.prepareStatement("SELECT DISTINCT currency_name FROM currencies")) {
+            ResultSet rs = stmt.executeQuery();
+            while (rs.next()) {
+                currencies.add(rs.getString("currency_name"));
+            }
+        } catch (SQLException e) {
+            Economy.getInstance().getLogger().severe("Ошибка получения валют: " + e.getMessage());
+        }
+
+        player.sendMessage(colorize("&6=== Все валютные пары ==="));
+        for (String currency1 : currencies) {
+            for (String currency2 : currencies) {
+                if (!currency1.equals(currency2)) {
+                    int orderCount = getActiveOrdersCount(currency1, currency2);
+                    if (orderCount > 0) {
+                        player.sendMessage(colorize("&7" + currency1 + " → " + currency2 + " &f(" + orderCount + " ордеров)"));
                     }
                 }
             }
         }
+        player.sendMessage(colorize("&7Используйте &f/bourse pair <валюта1> <валюта2> &7для просмотра"));
     }
 
     private void handleTradingPairClick(Player player, int slot, boolean leftClick) {

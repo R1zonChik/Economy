@@ -24,7 +24,7 @@ C:\Users\maxim\Downloads\Economy\src\main\java\xyz\moorus\economy\command\EmitCo
 C:\Users\maxim\Downloads\Economy\src\main\java\xyz\moorus\economy\command\CreateCurrencyCommand.java
 C:\Users\maxim\Downloads\Economy\src\main\java\xyz\moorus\economy\market\Bourse.java
 C:\Users\maxim\Downloads\Economy\src\main\java\xyz\moorus\economy\command\CreateCommandExecutor.java
-C:\Users\maxim\Downloads\Economy\src\main\java\xyz\moorus\economy\integration\MedievalFactionsIntegration.java
+C:\Users\maxim\Downloads\Economy\src\main\java\xyz\moorus\economy\integration\MedievalFactionsDatabase.java
 C:\Users\maxim\Downloads\Economy\src\main\java\xyz\moorus\economy\money\CreateResult.java
 C:\Users\maxim\Downloads\Economy\src\main\java\xyz\moorus\economy\money\PaymentResult.java
 C:\Users\maxim\Downloads\Economy\src\main\java\xyz\moorus\economy\main\MoneyExpansion.java

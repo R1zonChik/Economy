@@ -2,7 +2,6 @@ package xyz.moorus.economy.command;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
-import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -15,12 +14,14 @@ import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.util.io.BukkitObjectInputStream;
+import org.bukkit.util.io.BukkitObjectOutputStream;
 import xyz.moorus.economy.main.Economy;
 import xyz.moorus.economy.money.PaymentResult;
 import xyz.moorus.economy.money.WalletManager;
 import xyz.moorus.economy.sql.Database;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -33,6 +34,7 @@ public class AuctionCommand implements Command, Listener {
     private Map<String, Integer> playerPages = new HashMap<>();
     private Map<String, String> playerCurrency = new HashMap<>();
     private Map<String, String> playerCategory = new HashMap<>();
+    private Map<String, InventoryClickEvent> lastClickEvents = new HashMap<>();
 
     public AuctionCommand() {
         Bukkit.getPluginManager().registerEvents(this, Economy.getInstance());
@@ -48,8 +50,44 @@ public class AuctionCommand implements Command, Listener {
         Player player = Bukkit.getPlayer(sender);
         if (player == null) return;
 
-        // Всегда открываем главное меню
-        openMainMenu(player);
+        if (args.length == 0) {
+            openMainMenu(player);
+            return;
+        }
+
+        switch (args[0].toLowerCase()) {
+            case "sell":
+                if (args.length != 3) {
+                    player.sendMessage(colorize("&cИспользование: /ah sell <цена> <валюта>"));
+                    return;
+                }
+                handleSellItem(player, args[1], args[2]);
+                break;
+
+            case "my":
+                showMyItems(player);
+                break;
+
+            case "active":
+                openActiveItems(player, 0);
+                break;
+
+            case "expired":
+                openExpiredItems(player, 0);
+                break;
+
+            case "cancel":
+                if (args.length != 2) {
+                    player.sendMessage(colorize("&cИспользование: /ah cancel <id>"));
+                    return;
+                }
+                handleCancelItem(player, args[1]);
+                break;
+
+            default:
+                openMainMenu(player);
+                break;
+        }
     }
 
     private void openMainMenu(Player player) {
@@ -132,15 +170,15 @@ public class AuctionCommand implements Command, Listener {
 
         // === СПЕЦИАЛЬНЫЕ РАЗДЕЛЫ ===
 
-        // Мои предметы
+        // Мои предметы - ИСПРАВЛЕНО: Добавляем поддержку ЛКМ/ПКМ
         ItemStack myItems = new ItemStack(Material.ENDER_CHEST);
         ItemMeta myMeta = myItems.getItemMeta();
         myMeta.setDisplayName(colorize("&b§lМОИ ПРЕДМЕТЫ"));
         List<String> myLore = new ArrayList<>();
-        myLore.add(colorize("&7Истекшие лоты"));
-        myLore.add(colorize("&7Снятые с продажи предметы"));
+        myLore.add(colorize("&aЛКМ - Активные лоты"));
+        myLore.add(colorize("&cПКМ - Истекшие предметы"));
         myLore.add(colorize("&e"));
-        myLore.add(colorize("&aНажмите для просмотра"));
+        myLore.add(colorize("&7Нажмите для выбора"));
         myMeta.setLore(myLore);
         myItems.setItemMeta(myMeta);
         inv.setItem(20, myItems);
@@ -172,6 +210,11 @@ public class AuctionCommand implements Command, Listener {
         infoLore.add(colorize("&e"));
         infoLore.add(colorize("&7ЛКМ - купить предмет"));
         infoLore.add(colorize("&7ПКМ - подробная информация"));
+        infoLore.add(colorize("&e"));
+        infoLore.add(colorize("&7Команды:"));
+        infoLore.add(colorize("&f/ah sell <цена> <валюта> &7- продать"));
+        infoLore.add(colorize("&f/ah active &7- активные лоты"));
+        infoLore.add(colorize("&f/ah expired &7- истекшие предметы"));
         infoMeta.setLore(infoLore);
         info.setItemMeta(infoMeta);
         inv.setItem(40, info);
@@ -266,7 +309,7 @@ public class AuctionCommand implements Command, Listener {
         List<Map<String, Object>> items = database.getAuctionItems(category, currency, page, itemsPerPage);
 
         String title = colorize("&6Предметы");
-        if (currency != null) title += " - " + currency;
+        if (currency != null && !currency.equals("ALL")) title += " - " + currency;
         if (category != null && !category.equals("ALL")) title += " - " + category;
         if (items.size() >= itemsPerPage) title += " (" + (page + 1) + ")";
 
@@ -287,6 +330,45 @@ public class AuctionCommand implements Command, Listener {
             player.sendMessage(colorize("&7В данной категории нет предметов"));
         } else {
             player.sendMessage(colorize("&7Найдено предметов: " + items.size()));
+        }
+    }
+
+    // НОВЫЙ МЕТОД: Активные лоты игрока
+    private void openActiveItems(Player player, int page) {
+        playerMenus.put(player.getName(), "active");
+        playerPages.put(player.getName(), page);
+
+        Database database = Economy.getInstance().getDatabase();
+        List<Map<String, Object>> activeItems = database.getPlayerActiveAuctionItems(player.getName());
+
+        // Пагинация
+        int itemsPerPage = 45;
+        int totalPages = (int) Math.ceil((double) activeItems.size() / itemsPerPage);
+        int startIndex = page * itemsPerPage;
+        int endIndex = Math.min(startIndex + itemsPerPage, activeItems.size());
+
+        String title = colorize("&aАктивные лоты");
+        if (totalPages > 1) {
+            title += " (" + (page + 1) + "/" + totalPages + ")";
+        }
+
+        Inventory inv = Bukkit.createInventory(null, 54, title);
+
+        // Добавляем предметы
+        for (int i = startIndex; i < endIndex; i++) {
+            ItemStack displayItem = createActiveItemDisplay(activeItems.get(i));
+            inv.setItem(i - startIndex, displayItem);
+        }
+
+        // Навигация
+        addActiveNavigation(inv, page, totalPages);
+
+        player.openInventory(inv);
+
+        if (activeItems.isEmpty()) {
+            player.sendMessage(colorize(Economy.getInstance().getConfig().getString("messages.auction.no_active_items", "&7У вас нет активных лотов")));
+        } else {
+            player.sendMessage(colorize("&7Активных лотов: " + activeItems.size()));
         }
     }
 
@@ -322,7 +404,7 @@ public class AuctionCommand implements Command, Listener {
         player.openInventory(inv);
 
         if (expiredItems.isEmpty()) {
-            player.sendMessage(colorize("&7У вас нет истекших предметов"));
+            player.sendMessage(colorize(Economy.getInstance().getConfig().getString("messages.auction.no_expired_items", "&7У вас нет истекших предметов")));
         } else {
             player.sendMessage(colorize("&7Истекших предметов: " + expiredItems.size()));
         }
@@ -360,10 +442,73 @@ public class AuctionCommand implements Command, Listener {
         player.openInventory(inv);
 
         if (premiumItems.isEmpty()) {
-            player.sendMessage(colorize("&7Премиум магазин пуст"));
+            player.sendMessage(colorize(Economy.getInstance().getConfig().getString("messages.premium.shop_empty", "&7Премиум магазин пуст")));
         } else {
             player.sendMessage(colorize("&7Предметов в магазине: " + premiumItems.size()));
         }
+    }
+
+    // НОВЫЙ МЕТОД: Создание отображения активного предмета
+    private ItemStack createActiveItemDisplay(Map<String, Object> item) {
+        ItemStack displayItem = deserializeItem((String) item.get("item_data"));
+        if (displayItem == null) displayItem = new ItemStack(Material.PAPER);
+
+        ItemMeta meta = displayItem.getItemMeta();
+        if (meta != null) {
+            List<String> lore = meta.hasLore() ? new ArrayList<>(meta.getLore()) : new ArrayList<>();
+
+            lore.add(colorize("&8&m                    "));
+            lore.add(colorize("&aАктивный лот"));
+            lore.add(colorize("&7ID: &f" + item.get("id")));
+            lore.add(colorize("&7Цена: &e" + String.format("%,d", (Long) item.get("price")) + " " + item.get("currency")));
+            lore.add(colorize("&7Категория: &f" + item.get("category")));
+            lore.add(colorize("&7Создан: &f" + item.get("created_at")));
+            lore.add(colorize("&7Истекает: &f" + item.get("expires_at")));
+            lore.add(colorize("&8&m                    "));
+            lore.add(colorize("&cЛКМ - Отменить лот"));
+            lore.add(colorize("&eПКМ - Подробная информация"));
+
+            meta.setLore(lore);
+            displayItem.setItemMeta(meta);
+        }
+
+        return displayItem;
+    }
+
+    // НОВЫЙ МЕТОД: Навигация для активных предметов
+    private void addActiveNavigation(Inventory inv, int page, int totalPages) {
+        // Назад
+        ItemStack backButton = new ItemStack(Material.ARROW);
+        ItemMeta backMeta = backButton.getItemMeta();
+        backMeta.setDisplayName(colorize("&c← Назад к главному меню"));
+        backButton.setItemMeta(backMeta);
+        inv.setItem(49, backButton);
+
+        // Предыдущая страница
+        if (page > 0) {
+            ItemStack prevButton = new ItemStack(Material.ARROW);
+            ItemMeta prevMeta = prevButton.getItemMeta();
+            prevMeta.setDisplayName(colorize("&e← Предыдущая страница"));
+            prevButton.setItemMeta(prevMeta);
+            inv.setItem(48, prevButton);
+        }
+
+        // Следующая страница
+        if (page < totalPages - 1) {
+            ItemStack nextButton = new ItemStack(Material.ARROW);
+            ItemMeta nextMeta = nextButton.getItemMeta();
+            nextMeta.setDisplayName(colorize("&eСледующая страница →"));
+            nextButton.setItemMeta(nextMeta);
+            inv.setItem(50, nextButton);
+        }
+
+        // Обновить
+        ItemStack refreshButton = new ItemStack(Material.CLOCK);
+        ItemMeta refreshMeta = refreshButton.getItemMeta();
+        refreshMeta.setDisplayName(colorize("&b🔄 Обновить"));
+        refreshMeta.setLore(List.of(colorize("&7Обновить список активных лотов")));
+        refreshButton.setItemMeta(refreshMeta);
+        inv.setItem(53, refreshButton);
     }
 
     private void addItemsNavigation(Inventory inv, int page, boolean hasNextPage) {
@@ -561,6 +706,309 @@ public class AuctionCommand implements Command, Listener {
         return displayItem;
     }
 
+    private void handleSellItem(Player player, String priceStr, String currency) {
+        ItemStack item = player.getInventory().getItemInMainHand();
+
+        if (item == null || item.getType() == Material.AIR) {
+            player.sendMessage(colorize(Economy.getInstance().getConfig().getString("messages.auction.take_item_in_hand", "&cВозьмите предмет в руку!")));
+            return;
+        }
+
+        try {
+            long price = Long.parseLong(priceStr);
+
+            if (price <= 0) {
+                player.sendMessage(colorize(Economy.getInstance().getConfig().getString("messages.auction.invalid_price", "&cЦена должна быть больше 0!")));
+                return;
+            }
+
+            // ИСПРАВЛЕНО: Проверяем лимит предметов с учетом прав
+            int maxItems = getMaxItemsForPlayer(player);
+            int currentItems = getCurrentItemsCount(player.getName());
+
+            if (currentItems >= maxItems) {
+                String message = Economy.getInstance().getConfig().getString("messages.auction.max_items_reached", "&cВы достигли лимита предметов на аукционе! ({max})");
+                player.sendMessage(colorize(message.replace("{max}", String.valueOf(maxItems))));
+                return;
+            }
+
+            Database database = Economy.getInstance().getDatabase();
+
+            // ИСПРАВЛЕНО: Определяем правильную категорию
+            String category = determineItemCategory(item);
+
+            // ИСПРАВЛЕНО: Используем правильный метод
+            if (addAuctionItem(player.getName(), item, price, currency, category)) {
+                player.getInventory().setItemInMainHand(null);
+                String message = Economy.getInstance().getConfig().getString("messages.auction.item_listed", "&aПредмет выставлен на аукцион за {price} {currency}!");
+                player.sendMessage(colorize(message.replace("{price}", String.valueOf(price)).replace("{currency}", currency)));
+                player.sendMessage(colorize("&7Категория: &f" + category));
+            } else {
+                player.sendMessage(colorize("&cОшибка при выставлении предмета!"));
+            }
+
+        } catch (NumberFormatException e) {
+            player.sendMessage(colorize(Economy.getInstance().getConfig().getString("messages.auction.invalid_price", "&cНеверная цена!")));
+        }
+    }
+
+    // ИСПРАВЛЕНО: Добавляем метод для создания аукционного предмета
+    private boolean addAuctionItem(String sellerName, ItemStack item, long price, String currency, String category) {
+        Database database = Economy.getInstance().getDatabase();
+
+        try (Connection conn = database.getConnection()) {
+            String itemData = serializeItem(item);
+            if (itemData == null) return false;
+
+            int hoursToExpire = Economy.getInstance().getConfig().getInt("auction.expiration_hours", 72);
+            String sql = "INSERT INTO auction_items (seller_name, seller_uuid, item_data, price, currency, category, expires_at, is_sold) " +
+                    "VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+' || ? || ' hours'), 0)";
+
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setString(1, sellerName);
+                stmt.setString(2, Bukkit.getPlayer(sellerName).getUniqueId().toString());
+                stmt.setString(3, itemData);
+                stmt.setLong(4, price);
+                stmt.setString(5, currency);
+                stmt.setString(6, category);
+                stmt.setInt(7, hoursToExpire);
+
+                return stmt.executeUpdate() > 0;
+            }
+        } catch (SQLException e) {
+            Economy.getInstance().getLogger().severe("Ошибка добавления предмета на аукцион: " + e.getMessage());
+            return false;
+        }
+    }
+
+    // ИСПРАВЛЕНО: Улучшенная система лимитов
+    private int getMaxItemsForPlayer(Player player) {
+        // Проверяем конфигурацию
+        int configLimit = Economy.getInstance().getConfig().getInt("auction.max_items_per_player", 10);
+
+        // ИСПРАВЛЕНО: Правильная проверка прав по приоритету
+        if (player.isOp()) {
+            return Economy.getInstance().getConfig().getInt("auction.limits.op", 999);
+        }
+
+        if (player.hasPermission("economy.auction.max.unlimited")) {
+            return Economy.getInstance().getConfig().getInt("auction.limits.admin", 999);
+        }
+
+        if (player.hasPermission("economy.auction.max.50")) {
+            return Economy.getInstance().getConfig().getInt("auction.limits.vip", 50);
+        }
+
+        if (player.hasPermission("economy.auction.max.25")) {
+            return Economy.getInstance().getConfig().getInt("auction.limits.premium", 25);
+        }
+
+        if (player.hasPermission("economy.auction.max.10")) {
+            return Math.max(10, configLimit);
+        }
+
+        if (player.hasPermission("economy.auction.max.5")) {
+            return Math.max(5, configLimit);
+        }
+
+        if (player.hasPermission("economy.auction.max.3")) {
+            return Math.max(3, configLimit);
+        }
+
+        if (player.hasPermission("economy.auction.max.1")) {
+            return 1;
+        }
+
+        return configLimit; // Обычный лимит
+    }
+
+    private int getCurrentItemsCount(String playerName) {
+        Database database = Economy.getInstance().getDatabase();
+
+        try (Connection conn = database.getConnection()) {
+            String sql = "SELECT COUNT(*) FROM auction_items WHERE seller_name = ? AND is_sold = 0 AND expires_at > datetime('now')";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setString(1, playerName);
+
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        return rs.getInt(1);
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            // Игнорируем ошибки
+        }
+
+        return 0;
+    }
+
+    private String determineItemCategory(ItemStack item) {
+        Material material = item.getType();
+        String materialName = material.name();
+
+        // ИСПРАВЛЕНО: Правильное определение категорий
+        if (materialName.contains("BLOCK") || materialName.contains("BRICK") ||
+                materialName.contains("STONE") || materialName.contains("WOOD") ||
+                materialName.contains("PLANK") || materialName.contains("LOG") ||
+                material == Material.COBBLESTONE || material == Material.DIRT ||
+                material == Material.SAND || material == Material.GRAVEL) {
+            return "BUILDING_BLOCKS";
+        }
+
+        if (materialName.contains("SWORD") || materialName.contains("BOW") ||
+                materialName.contains("ARMOR") || materialName.contains("HELMET") ||
+                materialName.contains("CHESTPLATE") || materialName.contains("LEGGINGS") ||
+                materialName.contains("BOOTS") || materialName.contains("SHIELD")) {
+            return "COMBAT";
+        }
+
+        if (materialName.contains("PICKAXE") || materialName.contains("AXE") ||
+                materialName.contains("SHOVEL") || materialName.contains("HOE") ||
+                materialName.contains("SHEARS") || material == Material.FISHING_ROD) {
+            return "TOOLS";
+        }
+
+        if (materialName.contains("FOOD") || material.isEdible() ||
+                materialName.contains("BREAD") || materialName.contains("MEAT") ||
+                materialName.contains("FISH") || materialName.contains("APPLE") ||
+                materialName.contains("CARROT") || materialName.contains("POTATO")) {
+            return "FOOD";
+        }
+
+        if (materialName.contains("POTION") || materialName.contains("BREWING") ||
+                material == Material.BREWING_STAND || material == Material.CAULDRON) {
+            return "BREWING";
+        }
+
+        if (materialName.contains("RAIL") || materialName.contains("CART") ||
+                materialName.contains("BOAT") || material == Material.SADDLE) {
+            return "TRANSPORTATION";
+        }
+
+        if (materialName.contains("REDSTONE") || materialName.contains("PISTON") ||
+                materialName.contains("REPEATER") || materialName.contains("COMPARATOR") ||
+                materialName.contains("LEVER") || materialName.contains("BUTTON")) {
+            return "REDSTONE";
+        }
+
+        if (materialName.contains("PAINTING") || materialName.contains("FRAME") ||
+                materialName.contains("FLOWER") || materialName.contains("BANNER") ||
+                // ИСПРАВЛЕНО: Заменяем CARPET на WHITE_CARPET
+                material == Material.WHITE_CARPET || materialName.contains("WOOL")) {
+            return "DECORATIONS";
+        }
+
+        return "MISCELLANEOUS";
+    }
+
+    private void showMyItems(Player player) {
+        Database database = Economy.getInstance().getDatabase();
+
+        // ИСПРАВЛЕНО: Используем правильный метод
+        List<String> items = getPlayerAuctionItemsList(player.getName());
+
+        if (items.isEmpty()) {
+            player.sendMessage(colorize("&7У вас нет предметов на аукционе"));
+            return;
+        }
+
+        player.sendMessage(colorize("&6=== Ваши предметы на аукционе ==="));
+        for (String item : items) {
+            player.sendMessage(colorize("&7" + item));
+        }
+        player.sendMessage(colorize("&7Используйте &f/ah cancel <ID> &7для отмены"));
+        player.sendMessage(colorize("&7Или &f/ah active &7для GUI"));
+    }
+
+    // ИСПРАВЛЕНО: Добавляем метод для получения предметов игрока
+    private List<String> getPlayerAuctionItemsList(String playerName) {
+        List<String> items = new ArrayList<>();
+        Database database = Economy.getInstance().getDatabase();
+
+        try (Connection conn = database.getConnection()) {
+            String sql = "SELECT id, price, currency, created_at FROM auction_items WHERE seller_name = ? AND is_sold = 0 AND expires_at > datetime('now')";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setString(1, playerName);
+
+                try (ResultSet rs = stmt.executeQuery()) {
+                    while (rs.next()) {
+                        int id = rs.getInt("id");
+                        long price = rs.getLong("price");
+                        String currency = rs.getString("currency");
+                        String createdAt = rs.getString("created_at");
+
+                        items.add("ID: " + id + " | Цена: " + String.format("%,d", price) + " " + currency + " | Создан: " + createdAt);
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            Economy.getInstance().getLogger().severe("Ошибка получения предметов игрока: " + e.getMessage());
+        }
+
+        return items;
+    }
+
+    private void handleCancelItem(Player player, String itemIdStr) {
+        try {
+            int itemId = Integer.parseInt(itemIdStr);
+
+            // ИСПРАВЛЕНО: Используем правильный метод
+            if (cancelPlayerAuctionItem(itemId, player.getName())) {
+                player.sendMessage(colorize(Economy.getInstance().getConfig().getString("messages.auction.item_cancelled", "&aПредмет снят с аукциона!")));
+            } else {
+                player.sendMessage(colorize("&cПредмет не найден или не принадлежит вам!"));
+            }
+
+        } catch (NumberFormatException e) {
+            player.sendMessage(colorize("&cНеверный ID предмета!"));
+        }
+    }
+
+    // ИСПРАВЛЕНО: Добавляем метод для отмены предмета
+    private boolean cancelPlayerAuctionItem(int itemId, String playerName) {
+        Database database = Economy.getInstance().getDatabase();
+
+        try (Connection conn = database.getConnection()) {
+            // Сначала получаем предмет и проверяем владельца
+            String selectSql = "SELECT seller_name, item_data FROM auction_items WHERE id = ? AND is_sold = 0 AND expires_at > datetime('now')";
+            try (PreparedStatement selectStmt = conn.prepareStatement(selectSql)) {
+                selectStmt.setInt(1, itemId);
+
+                try (ResultSet rs = selectStmt.executeQuery()) {
+                    if (rs.next()) {
+                        String seller = rs.getString("seller_name");
+                        String itemData = rs.getString("item_data");
+
+                        if (!seller.equals(playerName)) {
+                            return false; // Не владелец
+                        }
+
+                        // Возвращаем предмет игроку
+                        Player player = Bukkit.getPlayer(playerName);
+                        if (player != null) {
+                            ItemStack item = deserializeItem(itemData);
+                            if (item != null) {
+                                player.getInventory().addItem(item);
+                            }
+                        }
+
+                        // Помечаем как проданный (отмененный)
+                        String deleteSql = "UPDATE auction_items SET is_sold = 1 WHERE id = ?";
+                        try (PreparedStatement deleteStmt = conn.prepareStatement(deleteSql)) {
+                            deleteStmt.setInt(1, itemId);
+                            return deleteStmt.executeUpdate() > 0;
+                        }
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            Economy.getInstance().getLogger().severe("Ошибка отмены предмета: " + e.getMessage());
+        }
+
+        return false;
+    }
+
     @EventHandler
     public void onInventoryClick(InventoryClickEvent event) {
         if (!(event.getWhoClicked() instanceof Player)) return;
@@ -576,18 +1024,24 @@ public class AuctionCommand implements Command, Listener {
         ItemStack clickedItem = event.getCurrentItem();
         if (clickedItem == null || clickedItem.getType() == Material.AIR) return;
 
+        // Сохраняем последний клик для определения ЛКМ/ПКМ
+        lastClickEvents.put(player.getName(), event);
+
         int slot = event.getSlot();
         String menuType = playerMenus.get(player.getName());
 
         switch (menuType) {
             case "main":
-                handleMainMenuClick(player, slot);
+                handleMainMenuClick(player, slot, event.isLeftClick());
                 break;
             case "currency":
                 handleCurrencyMenuClick(player, slot);
                 break;
             case "items":
                 handleItemsClick(player, slot, event.isLeftClick());
+                break;
+            case "active": // НОВЫЙ ОБРАБОТЧИК
+                handleActiveClick(player, slot);
                 break;
             case "expired":
                 handleExpiredClick(player, slot);
@@ -622,23 +1076,26 @@ public class AuctionCommand implements Command, Listener {
                     String currentTitle = player.getOpenInventory().getTitle();
                     if (!isOurInventory(currentTitle)) {
                         // Очищаем данные только если игрок не в наших меню
-                        playerMenus.remove(player.getName());
-                        playerPages.remove(player.getName());
-                        playerCurrency.remove(player.getName());
-                        playerCategory.remove(player.getName());
+                        cleanupPlayerData(player);
                     }
                 } else {
                     // Инвентарь закрыт - очищаем данные
-                    playerMenus.remove(player.getName());
-                    playerPages.remove(player.getName());
-                    playerCurrency.remove(player.getName());
-                    playerCategory.remove(player.getName());
+                    cleanupPlayerData(player);
                 }
-            }, 2L); // Увеличиваем задержку
+            }, 2L);
         }
     }
 
-    private void handleMainMenuClick(Player player, int slot) {
+    private void cleanupPlayerData(Player player) {
+        playerMenus.remove(player.getName());
+        playerPages.remove(player.getName());
+        playerCurrency.remove(player.getName());
+        playerCategory.remove(player.getName());
+        lastClickEvents.remove(player.getName());
+    }
+
+    // ИСПРАВЛЕНО: Обновленный обработчик главного меню с поддержкой ЛКМ/ПКМ
+    private void handleMainMenuClick(Player player, int slot, boolean leftClick) {
         switch (slot) {
             case 1: // VIL
                 openCurrencyMenu(player, "VIL");
@@ -654,8 +1111,12 @@ public class AuctionCommand implements Command, Listener {
             case 7: // Все валюты
                 openCurrencyMenu(player, null);
                 break;
-            case 20: // Мои предметы
-                openExpiredItems(player, 0);
+            case 20: // Мои предметы - ИСПРАВЛЕНО: Поддержка ЛКМ/ПКМ
+                if (leftClick) {
+                    openActiveItems(player, 0); // Активные лоты
+                } else {
+                    openExpiredItems(player, 0); // Истекшие предметы
+                }
                 break;
             case 24: // Премиум магазин
                 openPremiumShop(player, 0);
@@ -732,6 +1193,54 @@ public class AuctionCommand implements Command, Listener {
         }
     }
 
+    // НОВЫЙ ОБРАБОТЧИК: Активные предметы
+    private void handleActiveClick(Player player, int slot) {
+        if (slot == 49) { // Назад
+            openMainMenu(player);
+            return;
+        }
+
+        if (slot == 48) { // Предыдущая страница
+            int currentPage = playerPages.getOrDefault(player.getName(), 0);
+            if (currentPage > 0) {
+                openActiveItems(player, currentPage - 1);
+            }
+            return;
+        }
+
+        if (slot == 50) { // Следующая страница
+            int currentPage = playerPages.getOrDefault(player.getName(), 0);
+            openActiveItems(player, currentPage + 1);
+            return;
+        }
+
+        if (slot == 53) { // Обновить
+            int currentPage = playerPages.getOrDefault(player.getName(), 0);
+            openActiveItems(player, currentPage);
+            return;
+        }
+
+        if (slot < 45) { // Клик по предмету - отмена лота
+            Database database = Economy.getInstance().getDatabase();
+            List<Map<String, Object>> activeItems = database.getPlayerActiveAuctionItems(player.getName());
+
+            int currentPage = playerPages.getOrDefault(player.getName(), 0);
+            int itemIndex = currentPage * 45 + slot;
+
+            if (itemIndex < activeItems.size()) {
+                Map<String, Object> activeItem = activeItems.get(itemIndex);
+                int itemId = (Integer) activeItem.get("id");
+
+                if (cancelPlayerAuctionItem(itemId, player.getName())) {
+                    player.sendMessage(colorize(Economy.getInstance().getConfig().getString("messages.auction.item_cancelled", "&aЛот отменен и предмет возвращен!")));
+                    openActiveItems(player, currentPage); // Обновляем меню
+                } else {
+                    player.sendMessage(colorize("&cОшибка отмены лота!"));
+                }
+            }
+        }
+    }
+
     private void handleExpiredClick(Player player, int slot) {
         if (slot == 49) { // Назад
             openMainMenu(player);
@@ -768,7 +1277,7 @@ public class AuctionCommand implements Command, Listener {
                     player.getInventory().addItem(originalItem);
                     database.removeExpiredAuctionItem(itemId);
 
-                    player.sendMessage(colorize("&aПредмет возвращен в ваш инвентарь!"));
+                    player.sendMessage(colorize(Economy.getInstance().getConfig().getString("messages.auction.item_returned", "&aПредмет возвращен в ваш инвентарь!")));
                     openExpiredItems(player, currentPage); // Обновляем меню
                 }
             }
@@ -809,7 +1318,8 @@ public class AuctionCommand implements Command, Listener {
                 long price = (Long) premiumItem.get("price");
 
                 if (walletManager.getPlayerWallet(player.getName()).getSlots().getOrDefault("VIL", 0) < price) {
-                    player.sendMessage(colorize("&cНедостаточно VIL! Нужно: " + String.format("%,d", price)));
+                    String message = Economy.getInstance().getConfig().getString("messages.premium.insufficient_vil", "&cНедостаточно VIL! Нужно: {price}");
+                    player.sendMessage(colorize(message.replace("{price}", String.format("%,d", price))));
                     return;
                 }
 
@@ -820,7 +1330,8 @@ public class AuctionCommand implements Command, Listener {
                         player.getInventory().addItem(purchasedItem);
                         database.decreasePremiumShopStock(itemId);
 
-                        player.sendMessage(colorize("&a⭐ Предмет куплен за " + String.format("%,d", price) + " VIL! ⭐"));
+                        String message = Economy.getInstance().getConfig().getString("messages.premium.item_purchased", "&a⭐ Предмет куплен за {price} VIL! ⭐");
+                        player.sendMessage(colorize(message.replace("{price}", String.format("%,d", price))));
                         openPremiumShop(player, currentPage); // Обновляем меню
                     }
                 }
@@ -850,7 +1361,7 @@ public class AuctionCommand implements Command, Listener {
         long price = (Long) item.get("price");
 
         if (sellerName.equals(player.getName())) {
-            player.sendMessage(colorize("&cВы не можете купить свой предмет!"));
+            player.sendMessage(colorize(Economy.getInstance().getConfig().getString("messages.auction.cannot_buy_own_item", "&cВы не можете купить свой предмет!")));
             return;
         }
 
@@ -861,7 +1372,7 @@ public class AuctionCommand implements Command, Listener {
 
         Map<String, Object> currentItem = database.getAuctionItem(itemId);
         if (currentItem == null) {
-            player.sendMessage(colorize("&cПредмет уже продан или снят с продажи!"));
+            player.sendMessage(colorize(Economy.getInstance().getConfig().getString("messages.auction.item_already_sold", "&cПредмет уже продан или снят с продажи!")));
             openAuctionItems(player, currency, category, page);
             return;
         }
@@ -879,11 +1390,13 @@ public class AuctionCommand implements Command, Listener {
             database.logTransaction(player.getName(), sellerName, itemCurrency, price,
                     "AUCTION_BUY", "Auction purchase: item #" + itemId);
 
-            player.sendMessage(colorize("&aВы купили предмет за " + String.format("%,d", price) + " " + itemCurrency + "!"));
+            String buyMessage = Economy.getInstance().getConfig().getString("messages.auction.item_bought", "&aВы купили предмет за {price} {currency}!");
+            player.sendMessage(colorize(buyMessage.replace("{price}", String.format("%,d", price)).replace("{currency}", itemCurrency)));
 
             Player seller = Bukkit.getPlayer(sellerName);
             if (seller != null) {
-                seller.sendMessage(colorize("&aВаш предмет продан за " + String.format("%,d", price) + " " + itemCurrency + "!"));
+                String sellMessage = Economy.getInstance().getConfig().getString("messages.auction.item_sold", "&aВаш предмет продан за {price} {currency}!");
+                seller.sendMessage(colorize(sellMessage.replace("{price}", String.format("%,d", price)).replace("{currency}", itemCurrency)));
             }
 
             openAuctionItems(player, currency, category, page);
@@ -914,6 +1427,10 @@ public class AuctionCommand implements Command, Listener {
         player.sendMessage(colorize("&7Истекает: &f" + item.get("expires_at")));
     }
 
+    private InventoryClickEvent getLastClickEvent(Player player) {
+        return lastClickEvents.get(player.getName());
+    }
+
     private boolean isOurInventory(String title) {
         String cleanTitle = title.replace("§", "&").toLowerCase();
         return cleanTitle.contains("аукцион") ||
@@ -922,6 +1439,8 @@ public class AuctionCommand implements Command, Listener {
                 cleanTitle.contains("items") ||
                 cleanTitle.contains("истекшие") ||
                 cleanTitle.contains("expired") ||
+                cleanTitle.contains("активные") ||
+                cleanTitle.contains("active") ||
                 cleanTitle.contains("премиум") ||
                 cleanTitle.contains("premium");
     }
@@ -944,6 +1463,19 @@ public class AuctionCommand implements Command, Listener {
         } catch (Exception e) {
             Economy.getInstance().getLogger().warning("Ошибка десериализации предмета: " + e.getMessage());
             return new ItemStack(Material.PAPER);
+        }
+    }
+
+    private String serializeItem(ItemStack item) {
+        try {
+            ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+            BukkitObjectOutputStream dataOutput = new BukkitObjectOutputStream(outputStream);
+            dataOutput.writeObject(item);
+            dataOutput.close();
+            return Base64.getEncoder().encodeToString(outputStream.toByteArray());
+        } catch (Exception e) {
+            Economy.getInstance().getLogger().warning("Ошибка сериализации предмета: " + e.getMessage());
+            return null;
         }
     }
 

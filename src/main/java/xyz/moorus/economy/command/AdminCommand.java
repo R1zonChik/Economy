@@ -533,10 +533,10 @@ public class AdminCommand implements Command, TabCompleter {
             return;
         }
 
+        // ИСПРАВЛЕНО: Создаем кошелек если его нет
         if (!database.playerHasWallet(targetPlayer)) {
-            player.sendMessage(colorize("&cУ игрока " + targetPlayer + " нет кошелька!"));
-            player.sendMessage(colorize("&7Игрок должен зайти на сервер для создания кошелька"));
-            return;
+            database.createPlayer(targetPlayer, getPlayerUUID(targetPlayer));
+            player.sendMessage(colorize("&7Кошелек создан для игрока " + targetPlayer));
         }
 
         PlayerWallet wallet = walletManager.getPlayerWallet(targetPlayer);

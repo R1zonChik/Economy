@@ -2,7 +2,7 @@ package xyz.moorus.economy.main;
 
 import org.bukkit.plugin.java.JavaPlugin;
 import xyz.moorus.economy.command.*;
-import xyz.moorus.economy.integration.MedievalFactionsIntegration;
+import xyz.moorus.economy.integration.MedievalFactionsDatabase;
 import xyz.moorus.economy.money.WalletManager;
 import xyz.moorus.economy.sql.Database;
 
@@ -13,7 +13,7 @@ public final class Economy extends JavaPlugin {
     private static Economy instance;
     private Database database;
     private WalletManager walletManager;
-    private MedievalFactionsIntegration medievalFactionsIntegration;
+    private MedievalFactionsDatabase medievalFactionsDatabase;
 
     @Override
     public void onEnable() {
@@ -30,17 +30,17 @@ public final class Economy extends JavaPlugin {
             walletManager = new WalletManager(this);
 
             // Инициализируем интеграцию с Medieval Factions
-            medievalFactionsIntegration = new MedievalFactionsIntegration(this);
+            medievalFactionsDatabase = new MedievalFactionsDatabase(this);
 
             // Регистрируем команды
             registerCommands();
 
             getLogger().info("Economy плагин успешно запущен!");
 
-            if (medievalFactionsIntegration.isEnabled()) {
-                getLogger().info("Интеграция с Medieval Factions активна!");
+            if (medievalFactionsDatabase.isEnabled()) {
+                getLogger().info("Интеграция с Medieval Factions через базу данных активна!");
             } else {
-                getLogger().warning("Medieval Factions не найден! Создание валют недоступно.");
+                getLogger().warning("Medieval Factions база данных не найдена!");
             }
 
         } catch (SQLException e) {
@@ -69,7 +69,7 @@ public final class Economy extends JavaPlugin {
         // Регистрируем команды
         commandManager.registerCommand(new PayCommand());
         commandManager.registerCommand(new WalletCommand());
-        commandManager.registerCommand(new CreateCurrencyCommand()); // ИСПРАВЛЕНО: используем CreateCurrencyCommand
+        commandManager.registerCommand(new CreateCurrencyCommand());
         commandManager.registerCommand(new BourseCommand());
         commandManager.registerCommand(new EmitCommand());
         commandManager.registerCommand(new AuctionCommand());
@@ -106,7 +106,7 @@ public final class Economy extends JavaPlugin {
         return walletManager;
     }
 
-    public MedievalFactionsIntegration getMedievalFactionsIntegration() {
-        return medievalFactionsIntegration;
+    public MedievalFactionsDatabase getMedievalFactionsDatabase() {
+        return medievalFactionsDatabase;
     }
 }

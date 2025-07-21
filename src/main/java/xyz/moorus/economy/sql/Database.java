@@ -94,13 +94,26 @@ public class Database {
 
             // Таблица игроков
             statement.executeUpdate("CREATE TABLE IF NOT EXISTS players (" +
-                    "player_name VARCHAR(16) PRIMARY KEY," +
+                    "name VARCHAR(16) PRIMARY KEY," +
                     "uuid VARCHAR(36) UNIQUE," +
                     "first_join TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
                     "last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP" +
                     ")");
 
-            // Таблица ордеров биржи
+            // ИСПРАВЛЕНО: Таблица ордеров биржи
+            statement.executeUpdate("CREATE TABLE IF NOT EXISTS bourse_orders (" +
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "player_name VARCHAR(16) NOT NULL," +
+                    "sell_currency VARCHAR(3)," +
+                    "buy_currency VARCHAR(3)," +
+                    "sell_amount BIGINT," +
+                    "buy_amount BIGINT," +
+                    "status VARCHAR(20) DEFAULT 'ACTIVE'," +
+                    "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
+                    "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP" +
+                    ")");
+
+            // Совместимость: Таблица orders (алиас для bourse_orders)
             statement.executeUpdate("CREATE TABLE IF NOT EXISTS orders (" +
                     "id INTEGER PRIMARY KEY AUTOINCREMENT," +
                     "nickname VARCHAR(16) NOT NULL," +
@@ -113,7 +126,7 @@ public class Database {
                     "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP" +
                     ")");
 
-            // Таблица аукциона
+            // ИСПРАВЛЕНО: Таблица аукциона
             statement.executeUpdate("CREATE TABLE IF NOT EXISTS auction_items (" +
                     "id INTEGER PRIMARY KEY AUTOINCREMENT," +
                     "seller_name VARCHAR(16) NOT NULL," +
@@ -122,12 +135,13 @@ public class Database {
                     "currency VARCHAR(3) NOT NULL," +
                     "price BIGINT NOT NULL," +
                     "category VARCHAR(50) NOT NULL," +
+                    "status VARCHAR(20) DEFAULT 'ACTIVE'," +
                     "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
                     "expires_at TIMESTAMP NOT NULL," +
                     "is_sold BOOLEAN DEFAULT FALSE" +
                     ")");
 
-            // Таблица премиум магазина
+            // ИСПРАВЛЕНО: Таблица премиум магазина
             statement.executeUpdate("CREATE TABLE IF NOT EXISTS premium_shop (" +
                     "id INTEGER PRIMARY KEY AUTOINCREMENT," +
                     "item_data TEXT NOT NULL," +
@@ -200,6 +214,10 @@ public class Database {
 
             try {
                 statement.executeUpdate("ALTER TABLE player_wallets ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+            } catch (SQLException ignored) {}
+
+            try {
+                statement.executeUpdate("ALTER TABLE auction_items ADD COLUMN status VARCHAR(20) DEFAULT 'ACTIVE'");
             } catch (SQLException ignored) {}
 
         } catch (SQLException e) {
@@ -290,7 +308,7 @@ public class Database {
     public boolean playerHasWallet(String nickname) {
         try (Connection connection = getConnection();
              PreparedStatement statement = connection.prepareStatement(
-                     "SELECT COUNT(*) FROM players WHERE player_name = ?")) {
+                     "SELECT COUNT(*) FROM players WHERE name = ?")) {
             statement.setString(1, nickname);
             ResultSet rs = statement.executeQuery();
             return rs.next() && rs.getInt(1) > 0;
@@ -300,27 +318,32 @@ public class Database {
         }
     }
 
-    public void createPlayer(String nickname, String uuid) {
+    // ИСПРАВЛЕНО: Метод создания игрока
+    public boolean createPlayer(String nickname, String uuid) {
         try (Connection connection = getConnection();
              PreparedStatement statement = connection.prepareStatement(
-                     "INSERT OR IGNORE INTO players (player_name, uuid) VALUES (?, ?)")) {
+                     "INSERT OR IGNORE INTO players (name, uuid) VALUES (?, ?)")) {
             statement.setString(1, nickname);
             statement.setString(2, uuid);
-            statement.executeUpdate();
+            int result = statement.executeUpdate();
 
             // Выдаем стартовый баланс VIL
-            int startingBalance = plugin.getConfig().getInt("currencies.starting_vil_balance", 100);
-            if (startingBalance > 0) {
-                try (PreparedStatement walletStatement = connection.prepareStatement(
-                        "INSERT OR IGNORE INTO player_wallets (player_name, currency, amount) VALUES (?, 'VIL', ?)")) {
-                    walletStatement.setString(1, nickname);
-                    walletStatement.setLong(2, startingBalance);
-                    walletStatement.executeUpdate();
+            if (result > 0) {
+                int startingBalance = plugin.getConfig().getInt("currencies.starting_vil_balance", 100);
+                if (startingBalance > 0) {
+                    try (PreparedStatement walletStatement = connection.prepareStatement(
+                            "INSERT OR IGNORE INTO player_wallets (player_name, currency, amount) VALUES (?, 'VIL', ?)")) {
+                        walletStatement.setString(1, nickname);
+                        walletStatement.setLong(2, startingBalance);
+                        walletStatement.executeUpdate();
+                    }
                 }
             }
 
+            return result > 0;
         } catch (SQLException e) {
             plugin.getLogger().severe("Ошибка при создании игрока: " + e.getMessage());
+            return false;
         }
     }
 
@@ -488,6 +511,25 @@ public class Database {
     }
 
     // ==================== МЕТОДЫ ДЛЯ БИРЖИ ====================
+
+    // ИСПРАВЛЕНО: Метод создания ордера биржи
+    public boolean createBourseOrder(String playerName, String sellCurrency, String buyCurrency, int sellAmount, int buyAmount) {
+        try (Connection conn = getConnection()) {
+            String sql = "INSERT INTO bourse_orders (player_name, sell_currency, buy_currency, sell_amount, buy_amount) VALUES (?, ?, ?, ?, ?)";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setString(1, playerName);
+                stmt.setString(2, sellCurrency);
+                stmt.setString(3, buyCurrency);
+                stmt.setInt(4, sellAmount);
+                stmt.setInt(5, buyAmount);
+
+                return stmt.executeUpdate() > 0;
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().severe("Ошибка создания ордера: " + e.getMessage());
+            return false;
+        }
+    }
 
     public boolean addOrder(Order order) {
         try (Connection connection = getConnection();
@@ -677,6 +719,31 @@ public class Database {
         }
     }
 
+    // НОВЫЙ МЕТОД: Получение популярных валютных пар
+    public List<Map<String, Object>> getPopularCurrencyPairs(int limit) {
+        List<Map<String, Object>> pairs = new ArrayList<>();
+        try (Connection connection = getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "SELECT sell_currency, buy_currency, COUNT(*) as order_count " +
+                             "FROM orders WHERE status = 'ACTIVE' " +
+                             "GROUP BY sell_currency, buy_currency " +
+                             "ORDER BY order_count DESC LIMIT ?")) {
+            statement.setInt(1, limit);
+            ResultSet rs = statement.executeQuery();
+
+            while (rs.next()) {
+                Map<String, Object> pair = new HashMap<>();
+                pair.put("sell_currency", rs.getString("sell_currency"));
+                pair.put("buy_currency", rs.getString("buy_currency"));
+                pair.put("order_count", rs.getInt("order_count"));
+                pairs.add(pair);
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().severe("Ошибка при получении популярных пар: " + e.getMessage());
+        }
+        return pairs;
+    }
+
     // ==================== МЕТОДЫ ДЛЯ АУКЦИОНА ====================
 
     public int addAuctionItem(String sellerName, String sellerUuid, String itemData,
@@ -707,48 +774,54 @@ public class Database {
         return -1;
     }
 
+    // ИСПРАВЛЕНО: Метод получения предметов аукциона с правильной фильтрацией
     public List<Map<String, Object>> getAuctionItems(String category, String currency, int page, int itemsPerPage) {
         List<Map<String, Object>> items = new ArrayList<>();
-        StringBuilder query = new StringBuilder("SELECT * FROM auction_items WHERE is_sold = 0 AND expires_at > datetime('now')");
 
-        if (category != null && !category.equals("ALL")) {
-            query.append(" AND category = ?");
-        }
-        if (currency != null) {
-            query.append(" AND currency = ?");
-        }
+        try (Connection conn = getConnection()) {
+            StringBuilder sql = new StringBuilder("SELECT * FROM auction_items WHERE is_sold = 0 AND expires_at > datetime('now')");
+            List<String> params = new ArrayList<>();
 
-        query.append(" ORDER BY created_at DESC LIMIT ? OFFSET ?");
+            // ИСПРАВЛЕНО: Правильная фильтрация по валюте
+            if (currency != null && !currency.equals("ALL")) {
+                sql.append(" AND currency = ?");
+                params.add(currency);
+            }
 
-        try (Connection connection = getConnection();
-             PreparedStatement statement = connection.prepareStatement(query.toString())) {
-
-            int paramIndex = 1;
+            // ИСПРАВЛЕНО: Правильная фильтрация по категории
             if (category != null && !category.equals("ALL")) {
-                statement.setString(paramIndex++, category);
+                sql.append(" AND category = ?");
+                params.add(category);
             }
-            if (currency != null) {
-                statement.setString(paramIndex++, currency);
-            }
-            statement.setInt(paramIndex++, itemsPerPage);
-            statement.setInt(paramIndex, page * itemsPerPage);
 
-            ResultSet rs = statement.executeQuery();
-            while (rs.next()) {
-                Map<String, Object> item = new HashMap<>();
-                item.put("id", rs.getInt("id"));
-                item.put("seller_name", rs.getString("seller_name"));
-                item.put("item_data", rs.getString("item_data"));
-                item.put("currency", rs.getString("currency"));
-                item.put("price", rs.getLong("price"));
-                item.put("category", rs.getString("category"));
-                item.put("created_at", rs.getString("created_at"));
-                item.put("expires_at", rs.getString("expires_at"));
-                items.add(item);
+            sql.append(" ORDER BY created_at DESC LIMIT ? OFFSET ?");
+            params.add(String.valueOf(itemsPerPage));
+            params.add(String.valueOf(page * itemsPerPage));
+
+            try (PreparedStatement stmt = conn.prepareStatement(sql.toString())) {
+                for (int i = 0; i < params.size(); i++) {
+                    stmt.setString(i + 1, params.get(i));
+                }
+
+                try (ResultSet rs = stmt.executeQuery()) {
+                    while (rs.next()) {
+                        Map<String, Object> item = new HashMap<>();
+                        item.put("id", rs.getInt("id"));
+                        item.put("seller_name", rs.getString("seller_name"));
+                        item.put("item_data", rs.getString("item_data"));
+                        item.put("price", rs.getLong("price"));
+                        item.put("currency", rs.getString("currency"));
+                        item.put("category", rs.getString("category"));
+                        item.put("created_at", rs.getString("created_at"));
+                        item.put("expires_at", rs.getString("expires_at"));
+                        items.add(item);
+                    }
+                }
             }
         } catch (SQLException e) {
-            plugin.getLogger().severe("Ошибка при получении предметов аукциона: " + e.getMessage());
+            plugin.getLogger().severe("Ошибка получения предметов аукциона: " + e.getMessage());
         }
+
         return items;
     }
 
@@ -799,6 +872,37 @@ public class Database {
             plugin.getLogger().severe("Ошибка при подсчете предметов игрока на аукционе: " + e.getMessage());
             return 0;
         }
+    }
+
+    // НОВЫЙ МЕТОД: Получение активных предметов игрока
+    public List<Map<String, Object>> getPlayerActiveAuctionItems(String playerName) {
+        List<Map<String, Object>> items = new ArrayList<>();
+
+        try (Connection conn = getConnection()) {
+            String sql = "SELECT * FROM auction_items WHERE seller_name = ? AND is_sold = 0 AND expires_at > datetime('now') ORDER BY created_at DESC";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setString(1, playerName);
+
+                try (ResultSet rs = stmt.executeQuery()) {
+                    while (rs.next()) {
+                        Map<String, Object> item = new HashMap<>();
+                        item.put("id", rs.getInt("id"));
+                        item.put("seller_name", rs.getString("seller_name"));
+                        item.put("item_data", rs.getString("item_data"));
+                        item.put("price", rs.getLong("price"));
+                        item.put("currency", rs.getString("currency"));
+                        item.put("category", rs.getString("category"));
+                        item.put("created_at", rs.getString("created_at"));
+                        item.put("expires_at", rs.getString("expires_at"));
+                        items.add(item);
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().severe("Ошибка получения активных предметов: " + e.getMessage());
+        }
+
+        return items;
     }
 
     public List<Map<String, Object>> getExpiredAuctionItems(String playerName) {
@@ -1050,10 +1154,10 @@ public class Database {
         List<String> names = new ArrayList<>();
         try (Connection connection = getConnection();
              PreparedStatement statement = connection.prepareStatement(
-                     "SELECT DISTINCT player_name FROM players ORDER BY player_name LIMIT 50")) {
+                     "SELECT DISTINCT name FROM players ORDER BY name LIMIT 50")) {
             ResultSet rs = statement.executeQuery();
             while (rs.next()) {
-                names.add(rs.getString("player_name"));
+                names.add(rs.getString("name"));
             }
         } catch (SQLException e) {
             plugin.getLogger().severe("Ошибка при получении имен игроков: " + e.getMessage());
