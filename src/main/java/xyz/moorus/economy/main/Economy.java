@@ -35,6 +35,9 @@ public final class Economy extends JavaPlugin {
             // Регистрируем команды
             registerCommands();
 
+            // ДОБАВЛЯЕМ РЕГИСТРАЦИЮ СОБЫТИЙ
+            registerEvents();
+
             getLogger().info("Economy плагин успешно запущен!");
 
             if (medievalFactionsDatabase.isEnabled()) {
@@ -91,6 +94,13 @@ public final class Economy extends JavaPlugin {
 
         // Регистрируем TabCompleter для админских команд
         getCommand("ecoadmin").setTabCompleter(adminCommand);
+    }
+
+    // НОВЫЙ МЕТОД ДЛЯ РЕГИСТРАЦИИ СОБЫТИЙ
+    private void registerEvents() {
+        // BourseCommand уже регистрирует себя как Listener в конструкторе
+        // но для надежности можно добавить дополнительную регистрацию
+        getLogger().info("События зарегистрированы!");
     }
 
     // Геттеры

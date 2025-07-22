@@ -41,7 +41,13 @@ public class BourseCommand implements Command, Listener {
     }
 
     public BourseCommand() {
-        Bukkit.getPluginManager().registerEvents(this, Economy.getInstance());
+        try {
+            Bukkit.getPluginManager().registerEvents(this, Economy.getInstance());
+            Economy.getInstance().getLogger().info("BourseCommand события зарегистрированы успешно!");
+        } catch (Exception e) {
+            Economy.getInstance().getLogger().severe("Ошибка регистрации событий BourseCommand: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
 
     @Override
@@ -114,7 +120,7 @@ public class BourseCommand implements Command, Listener {
     }
 
     private int getMaxOrders(Player player) {
-        if (player.hasPermission("economy.bourse.max.unlimited")) return -1; // Неограниченно
+        if (player.hasPermission("economy.bourse.max.unlimited")) return -1;
         if (player.hasPermission("economy.bourse.max.20")) return 20;
         if (player.hasPermission("economy.bourse.max.15")) return 15;
         if (player.hasPermission("economy.bourse.max.10")) return 10;
@@ -175,7 +181,6 @@ public class BourseCommand implements Command, Listener {
     }
 
     private void addBourseHelp(Inventory gui) {
-        // Подсказка по использованию
         ItemStack help = new ItemStack(Material.PAPER);
         ItemMeta helpMeta = help.getItemMeta();
         helpMeta.setDisplayName(colorize("&a📖 Как пользоваться биржей"));
@@ -205,9 +210,9 @@ public class BourseCommand implements Command, Listener {
         Database database = Economy.getInstance().getDatabase();
 
         try (Connection conn = database.getConnection()) {
-            // Получаем самые популярные пары по количеству ордеров
+            // ИСПРАВЛЕНО: Получаем самые популярные пары по количеству ордеров (включая завершенные)
             String sql = "SELECT sell_currency, buy_currency, COUNT(*) as order_count " +
-                    "FROM bourse_orders WHERE status = 'ACTIVE' " +
+                    "FROM orders " +
                     "GROUP BY sell_currency, buy_currency " +
                     "ORDER BY order_count DESC LIMIT 6";
 
@@ -224,15 +229,69 @@ public class BourseCommand implements Command, Listener {
             Economy.getInstance().getLogger().warning("Ошибка получения популярных пар: " + e.getMessage());
         }
 
-        // Если нет популярных пар, добавляем базовые
+        // Если популярных пар меньше 6, добавляем базовые комбинации из существующих валют
+        if (pairs.size() < 6) {
+            Set<String> existingPairs = new HashSet<>(pairs);
+            List<String> allCurrencies = getAllAvailableCurrencies();
+
+            // Создаем популярные комбинации
+            for (String currency1 : allCurrencies) {
+                if (pairs.size() >= 6) break;
+
+                for (String currency2 : allCurrencies) {
+                    if (pairs.size() >= 6) break;
+
+                    if (!currency1.equals(currency2)) {
+                        String pair = currency1 + "/" + currency2;
+                        if (!existingPairs.contains(pair)) {
+                            pairs.add(pair);
+                            existingPairs.add(pair);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Если все еще мало пар, добавляем базовые
         if (pairs.isEmpty()) {
             pairs.add("VIL/ABC");
             pairs.add("ABC/VIL");
-            pairs.add("VIL/XYZ");
-            pairs.add("XYZ/VIL");
+            pairs.add("VIL/USD");
+            pairs.add("USD/VIL");
+            pairs.add("VIL/EUR");
+            pairs.add("EUR/VIL");
         }
 
         return pairs;
+    }
+
+    // Новый метод для получения всех доступных валют
+    private List<String> getAllAvailableCurrencies() {
+        List<String> currencies = new ArrayList<>();
+        Database database = Economy.getInstance().getDatabase();
+
+        try (Connection conn = database.getConnection()) {
+            String sql = "SELECT DISTINCT currency_name FROM currencies ORDER BY currency_name";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                try (ResultSet rs = stmt.executeQuery()) {
+                    while (rs.next()) {
+                        currencies.add(rs.getString("currency_name"));
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            Economy.getInstance().getLogger().warning("Ошибка получения валют: " + e.getMessage());
+        }
+
+        // Если нет валют в базе, добавляем базовые
+        if (currencies.isEmpty()) {
+            currencies.add("VIL");
+            currencies.add("ABC");
+            currencies.add("USD");
+            currencies.add("EUR");
+        }
+
+        return currencies;
     }
 
     private ItemStack createCurrencyPairItem(String sellCurrency, String buyCurrency) {
@@ -240,16 +299,21 @@ public class BourseCommand implements Command, Listener {
         ItemMeta meta = item.getItemMeta();
         meta.setDisplayName(colorize("&6" + sellCurrency + " → " + buyCurrency));
 
-        // Получаем статистику по паре
         int activeOrders = getActiveOrdersCount(sellCurrency, buyCurrency);
+        int totalOrders = getTotalOrdersCount(sellCurrency, buyCurrency); // Новый метод
         double bestRate = getBestExchangeRate(sellCurrency, buyCurrency);
 
         List<String> lore = new ArrayList<>();
         lore.add(colorize("&7Валютная пара: &f" + sellCurrency + "/" + buyCurrency));
         lore.add(colorize("&7Активных ордеров: &e" + activeOrders));
+        lore.add(colorize("&7Всего было ордеров: &7" + totalOrders));
+
         if (bestRate > 0) {
             lore.add(colorize("&7Лучший курс: &a" + String.format("%.4f", bestRate)));
+        } else {
+            lore.add(colorize("&7Лучший курс: &7нет данных"));
         }
+
         lore.add(colorize("&e"));
         lore.add(colorize("&eНажмите для просмотра ордеров"));
 
@@ -258,15 +322,14 @@ public class BourseCommand implements Command, Listener {
         return item;
     }
 
-    private int getActiveOrdersCount(String sellCurrency, String buyCurrency) {
+    // Новый метод для подсчета всех ордеров (включая завершенные)
+    private int getTotalOrdersCount(String sellCurrency, String buyCurrency) {
         Database database = Economy.getInstance().getDatabase();
-
         try (Connection conn = database.getConnection()) {
-            String sql = "SELECT COUNT(*) FROM bourse_orders WHERE sell_currency = ? AND buy_currency = ? AND status = 'ACTIVE'";
+            String sql = "SELECT COUNT(*) FROM orders WHERE sell_currency = ? AND buy_currency = ?";
             try (PreparedStatement stmt = conn.prepareStatement(sql)) {
                 stmt.setString(1, sellCurrency);
                 stmt.setString(2, buyCurrency);
-
                 try (ResultSet rs = stmt.executeQuery()) {
                     if (rs.next()) {
                         return rs.getInt(1);
@@ -276,19 +339,38 @@ public class BourseCommand implements Command, Listener {
         } catch (SQLException e) {
             // Игнорируем ошибки
         }
+        return 0;
+    }
 
+    // ИСПРАВЛЕНО: Правильный подсчет ордеров для пары
+    private int getActiveOrdersCount(String sellCurrency, String buyCurrency) {
+        Database database = Economy.getInstance().getDatabase();
+        try (Connection conn = database.getConnection()) {
+            // Используем таблицу orders вместо bourse_orders
+            String sql = "SELECT COUNT(*) FROM orders WHERE sell_currency = ? AND buy_currency = ? AND status = 'ACTIVE'";
+            try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setString(1, sellCurrency);
+                stmt.setString(2, buyCurrency);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        return rs.getInt(1);
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            Economy.getInstance().getLogger().warning("Ошибка подсчета ордеров для пары " + sellCurrency + "/" + buyCurrency + ": " + e.getMessage());
+        }
         return 0;
     }
 
     private double getBestExchangeRate(String sellCurrency, String buyCurrency) {
         Database database = Economy.getInstance().getDatabase();
-
         try (Connection conn = database.getConnection()) {
-            String sql = "SELECT MIN(buy_amount / sell_amount) FROM bourse_orders WHERE sell_currency = ? AND buy_currency = ? AND status = 'ACTIVE'";
+            // Используем таблицу orders
+            String sql = "SELECT MIN(CAST(buy_amount AS REAL) / CAST(sell_amount AS REAL)) FROM orders WHERE sell_currency = ? AND buy_currency = ? AND status = 'ACTIVE'";
             try (PreparedStatement stmt = conn.prepareStatement(sql)) {
                 stmt.setString(1, sellCurrency);
                 stmt.setString(2, buyCurrency);
-
                 try (ResultSet rs = stmt.executeQuery()) {
                     if (rs.next()) {
                         return rs.getDouble(1);
@@ -298,18 +380,17 @@ public class BourseCommand implements Command, Listener {
         } catch (SQLException e) {
             // Игнорируем ошибки
         }
-
         return 0.0;
     }
 
+    // ИСПРАВЛЕНО: Правильный подсчет ордеров игрока
     private int getPlayerOrderCount(String playerName) {
         Database database = Economy.getInstance().getDatabase();
-
         try (Connection conn = database.getConnection()) {
-            String sql = "SELECT COUNT(*) FROM bourse_orders WHERE player_name = ? AND status = 'ACTIVE'";
+            // Используем таблицу orders и поле nickname
+            String sql = "SELECT COUNT(*) FROM orders WHERE nickname = ? AND status = 'ACTIVE'";
             try (PreparedStatement stmt = conn.prepareStatement(sql)) {
                 stmt.setString(1, playerName);
-
                 try (ResultSet rs = stmt.executeQuery()) {
                     if (rs.next()) {
                         return rs.getInt(1);
@@ -317,13 +398,13 @@ public class BourseCommand implements Command, Listener {
                 }
             }
         } catch (SQLException e) {
-            // Игнорируем ошибки
+            Economy.getInstance().getLogger().warning("Ошибка подсчета ордеров игрока " + playerName + ": " + e.getMessage());
         }
-
         return 0;
     }
 
     private void openTradingPairOrders(Player player, String currency1, String currency2) {
+        // СОХРАНЯЕМ ДАННЫЕ ПЕРЕД ОТКРЫТИЕМ МЕНЮ
         playerMenus.put(player.getName(), "trading_pair");
         playerTradingPair.put(player.getName(), new String[]{currency1, currency2});
         playerPages.put(player.getName(), 0);
@@ -332,15 +413,14 @@ public class BourseCommand implements Command, Listener {
         List<Order> orders = database.getOrders(currency1, currency2);
 
         String title = colorize("&6" + currency1 + " → " + currency2);
-
-        Inventory ordersGui = Bukkit.createInventory(null, 54, colorize(title));
+        Inventory ordersGui = Bukkit.createInventory(null, 54, title);
 
         int slot = 0;
         for (Order order : orders) {
-            if (slot >= 45) break; // Оставляем место для кнопок
-
+            if (slot >= 45) break;
             ItemStack orderItem = createOrderDisplay(order);
-            ordersGui.setItem(slot++, orderItem);
+            ordersGui.setItem(slot, orderItem);
+            slot++;
         }
 
         // Кнопка назад
@@ -376,6 +456,7 @@ public class BourseCommand implements Command, Listener {
         }
         ordersGui.setItem(53, refreshButton);
 
+        // ОТКРЫВАЕМ МЕНЮ ТОЛЬКО ПОСЛЕ НАСТРОЙКИ ВСЕХ ДАННЫХ
         player.openInventory(ordersGui);
 
         if (orders.isEmpty()) {
@@ -405,9 +486,9 @@ public class BourseCommand implements Command, Listener {
         int slot = 0;
         for (Order order : myOrders) {
             if (slot >= 45) break;
-
             ItemStack orderItem = createMyOrderDisplay(order);
-            myOrdersGui.setItem(slot++, orderItem);
+            myOrdersGui.setItem(slot, orderItem);
+            slot++;
         }
 
         // Навигационные кнопки
@@ -486,32 +567,23 @@ public class BourseCommand implements Command, Listener {
             double rate = (double) order.getBuyAmount() / order.getSellAmount();
             meta.setDisplayName(colorize("&6Ордер #" + order.getId()));
 
-            List<String> lore = Economy.getInstance().getConfig().getStringList("bourse.order_display.order_lore");
-            if (lore.isEmpty()) {
-                lore = Arrays.asList(
-                        "&7Продавец: &f{seller}",
-                        "&7Продает: &e{sell_amount} {sell_currency}",
-                        "&7Покупает: &e{buy_amount} {buy_currency}",
-                        "&7Курс: &f{rate}",
-                        "&7За 1 {sell_currency} = {rate} {buy_currency}",
-                        "",
-                        "&aЛКМ - Купить",
-                        "&cПКМ - Подробнее"
-                );
+            List<String> lore = Arrays.asList(
+                    "&7Продавец: &f" + order.getNickname(),
+                    "&7Продает: &e" + String.format("%,d", order.getSellAmount()) + " " + order.getSellCurrency(),
+                    "&7Покупает: &e" + String.format("%,d", order.getBuyAmount()) + " " + order.getBuyCurrency(),
+                    "&7Курс: &f" + String.format("%.6f", rate),
+                    "&7За 1 " + order.getSellCurrency() + " = " + String.format("%.6f", rate) + " " + order.getBuyCurrency(),
+                    "",
+                    "&aЛКМ - Купить",
+                    "&cПКМ - Подробнее"
+            );
+
+            List<String> colorizedLore = new ArrayList<>();
+            for (String line : lore) {
+                colorizedLore.add(colorize(line));
             }
 
-            for (int i = 0; i < lore.size(); i++) {
-                String line = lore.get(i);
-                line = line.replace("{seller}", order.getNickname())
-                        .replace("{sell_amount}", String.format("%,d", order.getSellAmount()))
-                        .replace("{sell_currency}", order.getSellCurrency())
-                        .replace("{buy_amount}", String.format("%,d", order.getBuyAmount()))
-                        .replace("{buy_currency}", order.getBuyCurrency())
-                        .replace("{rate}", String.format("%.6f", rate));
-                lore.set(i, colorize(line));
-            }
-
-            meta.setLore(lore);
+            meta.setLore(colorizedLore);
             orderItem.setItemMeta(meta);
         }
         return orderItem;
@@ -524,31 +596,23 @@ public class BourseCommand implements Command, Listener {
             double rate = (double) order.getBuyAmount() / order.getSellAmount();
             meta.setDisplayName(colorize("&6Мой ордер #" + order.getId()));
 
-            List<String> lore = Economy.getInstance().getConfig().getStringList("bourse.order_display.my_order_lore");
-            if (lore.isEmpty()) {
-                lore = Arrays.asList(
-                        "&7Продаю: &e{sell_amount} {sell_currency}",
-                        "&7Покупаю: &e{buy_amount} {buy_currency}",
-                        "&7Курс: &f{rate}",
-                        "&7Статус: &aАктивен",
-                        "",
-                        "&cЛКМ - Отменить ордер",
-                        "&eПКМ - Подробная информация",
-                        "&7Shift+ЛКМ - Подтвердить отмену"
-                );
+            List<String> lore = Arrays.asList(
+                    "&7Продаю: &e" + String.format("%,d", order.getSellAmount()) + " " + order.getSellCurrency(),
+                    "&7Покупаю: &e" + String.format("%,d", order.getBuyAmount()) + " " + order.getBuyCurrency(),
+                    "&7Курс: &f" + String.format("%.6f", rate),
+                    "&7Статус: &aАктивен",
+                    "",
+                    "&cЛКМ - Отменить ордер",
+                    "&eПКМ - Подробная информация",
+                    "&7Shift+ЛКМ - Подтвердить отмену"
+            );
+
+            List<String> colorizedLore = new ArrayList<>();
+            for (String line : lore) {
+                colorizedLore.add(colorize(line));
             }
 
-            for (int i = 0; i < lore.size(); i++) {
-                String line = lore.get(i);
-                line = line.replace("{sell_amount}", String.format("%,d", order.getSellAmount()))
-                        .replace("{sell_currency}", order.getSellCurrency())
-                        .replace("{buy_amount}", String.format("%,d", order.getBuyAmount()))
-                        .replace("{buy_currency}", order.getBuyCurrency())
-                        .replace("{rate}", String.format("%.6f", rate));
-                lore.set(i, colorize(line));
-            }
-
-            meta.setLore(lore);
+            meta.setLore(colorizedLore);
             orderItem.setItemMeta(meta);
         }
         return orderItem;
@@ -557,15 +621,19 @@ public class BourseCommand implements Command, Listener {
     @EventHandler
     public void onInventoryClick(InventoryClickEvent event) {
         if (!(event.getWhoClicked() instanceof Player)) return;
+
         Player player = (Player) event.getWhoClicked();
         String title = event.getView().getTitle();
 
-        // Простая проверка наших меню
-        if (!title.contains("→") && !title.contains("Биржа") && !title.contains("Мои ордера")) {
+        // Убираем цветовые коды для проверки
+        String cleanTitle = title.replaceAll("§[0-9a-fk-or]", "").toLowerCase();
+
+        // Проверяем что это наше меню
+        if (!cleanTitle.contains("биржа") && !cleanTitle.contains("ордер") && !cleanTitle.contains("→")) {
             return;
         }
 
-        // ПОЛНАЯ БЛОКИРОВКА ВСЕХ ДЕЙСТВИЙ
+        // ПОЛНАЯ БЛОКИРОВКА ВСЕХ ДЕЙСТВИЙ В НАШИХ МЕНЮ
         event.setCancelled(true);
 
         // Проверяем что клик в верхнем инвентаре
@@ -574,48 +642,28 @@ public class BourseCommand implements Command, Listener {
         }
 
         ItemStack clickedItem = event.getCurrentItem();
-        if (clickedItem == null || clickedItem.getType() == Material.AIR) return;
+        if (clickedItem == null || clickedItem.getType() == Material.AIR) {
+            return;
+        }
 
         int slot = event.getSlot();
 
-        // ПРЯМАЯ ОБРАБОТКА БЕЗ ОПРЕДЕЛЕНИЯ ТИПА
-        if (title.contains("→")) {
-            // Это меню торговой пары
+        // Определяем тип меню и обрабатываем клик
+        if (cleanTitle.contains("→")) {
             handleTradingPairClick(player, slot, event.isLeftClick());
-        } else if (title.contains("Мои ордера")) {
-            // Это меню моих ордеров
+        } else if (cleanTitle.contains("мои ордер")) {
             handleMyOrdersClick(player, slot, event.isLeftClick(), event.isRightClick(), event.isShiftClick());
-        } else if (title.contains("Биржа")) {
-            // Это главное меню биржи
+        } else if (cleanTitle.contains("биржа")) {
             handleBourseMenuClick(player, slot, event.getClick());
         }
     }
 
-    private String determineMenuType(String title) {
-        String cleanTitle = title.replace("§", "").replace("&", "").toLowerCase();
-
-        if (cleanTitle.contains("мои ордера")) {
-            return "my_orders";
-        } else if (cleanTitle.contains("→") || cleanTitle.contains("->")) {
-            return "trading_pair";
-        } else if (cleanTitle.contains("биржа валют")) {
-            return "bourse";
-        }
-
-        return "unknown";
-    }
-
     private boolean isOurInventory(String title) {
-        String cleanTitle = title.replace("§", "").replace("&", "").toLowerCase();
-        return cleanTitle.contains("биржа валют") ||
-                cleanTitle.contains("мои ордера") ||
+        String cleanTitle = title.replaceAll("§[0-9a-fk-or]", "").toLowerCase();
+        return cleanTitle.contains("биржа") ||
+                cleanTitle.contains("ордер") ||
                 cleanTitle.contains("→") ||
-                cleanTitle.contains("->") ||
-                cleanTitle.contains("bourse") ||
-                cleanTitle.contains("orders") ||
-                cleanTitle.contains("vil") ||
-                cleanTitle.contains("abc") ||
-                cleanTitle.contains("создать ордер");
+                cleanTitle.contains("bourse");
     }
 
     @EventHandler
@@ -623,12 +671,27 @@ public class BourseCommand implements Command, Listener {
         if (!(event.getPlayer() instanceof Player)) return;
         Player player = (Player) event.getPlayer();
 
-        // Очищаем данные игрока при закрытии инвентаря
         String title = event.getView().getTitle();
         if (isOurInventory(title)) {
-            playerMenus.remove(player.getName());
-            playerPages.remove(player.getName());
-            playerTradingPair.remove(player.getName());
+            // ЗАДЕРЖКА ОЧИСТКИ ДАННЫХ НА 2 ТИКА
+            Bukkit.getScheduler().runTaskLater(Economy.getInstance(), () -> {
+                // Проверяем что игрок не в другом меню биржи
+                try {
+                    Inventory currentInv = player.getOpenInventory().getTopInventory();
+                    String currentTitle = player.getOpenInventory().getTitle();
+
+                    if (currentInv == null || !isOurInventory(currentTitle)) {
+                        playerMenus.remove(player.getName());
+                        playerPages.remove(player.getName());
+                        playerTradingPair.remove(player.getName());
+                    }
+                } catch (Exception e) {
+                    // Если произошла ошибка, очищаем данные
+                    playerMenus.remove(player.getName());
+                    playerPages.remove(player.getName());
+                    playerTradingPair.remove(player.getName());
+                }
+            }, 2L);
         }
     }
 
@@ -637,8 +700,6 @@ public class BourseCommand implements Command, Listener {
         if (!(event.getWhoClicked() instanceof Player)) return;
 
         String title = event.getView().getTitle();
-
-        // Блокируем перетаскивание в наших меню
         if (isOurInventory(title)) {
             event.setCancelled(true);
         }
@@ -652,7 +713,6 @@ public class BourseCommand implements Command, Listener {
             if (clicked != null && clicked.getType() == Material.GOLD_NUGGET) {
                 String displayName = clicked.getItemMeta().getDisplayName();
                 String[] currencies = displayName.replace("§6", "").split(" → ");
-
                 if (currencies.length == 2) {
                     openTradingPairOrders(player, currencies[0], currencies[1]);
                 }
@@ -665,7 +725,6 @@ public class BourseCommand implements Command, Listener {
     private void showAllCurrencyPairs(Player player) {
         Database database = Economy.getInstance().getDatabase();
 
-        // Получаем все валюты
         Set<String> currencies = new HashSet<>();
         try (Connection connection = database.getConnection();
              PreparedStatement stmt = connection.prepareStatement("SELECT DISTINCT currency_name FROM currencies")) {
@@ -692,7 +751,20 @@ public class BourseCommand implements Command, Listener {
     }
 
     private void handleTradingPairClick(Player player, int slot, boolean leftClick) {
-        // УБИРАЕМ ОТЛАДКУ И ДОБАВЛЯЕМ ПРЯМУЮ ОБРАБОТКУ
+        // ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА И ВОССТАНОВЛЕНИЕ ДАННЫХ
+        String[] pair = playerTradingPair.get(player.getName());
+        if (pair == null) {
+            // Пытаемся восстановить пару из заголовка меню
+            String title = player.getOpenInventory().getTitle();
+            String cleanTitle = title.replaceAll("§[0-9a-fk-or]", "");
+            if (cleanTitle.contains("→")) {
+                String[] titleParts = cleanTitle.split(" → ");
+                if (titleParts.length == 2) {
+                    pair = new String[]{titleParts[0].trim(), titleParts[1].trim()};
+                    playerTradingPair.put(player.getName(), pair);
+                }
+            }
+        }
 
         if (slot == 45) { // Назад
             openBourseMenu(player);
@@ -700,7 +772,6 @@ public class BourseCommand implements Command, Listener {
         }
 
         if (slot == 49) { // Создать ордер
-            String[] pair = playerTradingPair.get(player.getName());
             if (pair != null) {
                 player.closeInventory();
                 player.sendMessage(colorize("&6=== СОЗДАНИЕ ОРДЕРА ==="));
@@ -709,32 +780,32 @@ public class BourseCommand implements Command, Listener {
                 player.sendMessage(colorize("&7Пример: &f/bourse add " + pair[0] + " 100 " + pair[1] + " 50"));
                 player.sendMessage(colorize("&e"));
                 player.sendMessage(colorize("&7Это означает: продаю 100 " + pair[0] + ", покупаю 50 " + pair[1]));
+            } else {
+                player.sendMessage(colorize("&cОшибка: не удалось определить валютную пару!"));
             }
             return;
         }
 
         if (slot == 53) { // Обновить
-            String[] pair = playerTradingPair.get(player.getName());
             if (pair != null) {
                 openTradingPairOrders(player, pair[0], pair[1]);
+            } else {
+                player.sendMessage(colorize("&cОшибка: не удалось обновить меню!"));
             }
             return;
         }
 
         if (slot < 45) { // Клик по ордеру
             Database database = Economy.getInstance().getDatabase();
-            String[] pair = playerTradingPair.get(player.getName());
 
             if (pair != null) {
                 List<Order> orders = database.getOrders(pair[0], pair[1]);
                 if (slot < orders.size()) {
                     Order order = orders.get(slot);
                     if (leftClick) {
-                        // Покупка ордера
                         player.closeInventory();
                         handleBuyOrder(player, String.valueOf(order.getId()));
                     } else {
-                        // Показать детали
                         player.closeInventory();
                         showOrderDetails(player, order);
                     }
@@ -774,16 +845,13 @@ public class BourseCommand implements Command, Listener {
                 Order order = myOrders.get(slot);
 
                 if (leftClick && shiftClick) {
-                    // Подтверждение отмены
                     cancelOrder(player, order);
-                    openMyOrdersMenu(player, currentPage); // Обновляем меню
+                    openMyOrdersMenu(player, currentPage);
                 } else if (leftClick) {
-                    // Предупреждение об отмене
                     player.sendMessage(colorize("&eВы уверены что хотите отменить ордер #" + order.getId() + "?"));
                     player.sendMessage(colorize("&7Нажмите Shift+ЛКМ для подтверждения"));
                     player.sendMessage(colorize("&7Будет возвращено: " + String.format("%,d", order.getSellAmount()) + " " + order.getSellCurrency()));
                 } else if (rightClick) {
-                    // Показать детали
                     player.closeInventory();
                     showOrderDetails(player, order);
                 }
@@ -795,7 +863,6 @@ public class BourseCommand implements Command, Listener {
         WalletManager walletManager = Economy.getInstance().getWalletManager();
         Database database = Economy.getInstance().getDatabase();
 
-        // Проверяем лимит ордеров
         int currentOrders = database.getPlayerOrderCount(player.getName());
         int maxOrders = getMaxOrders(player);
 
@@ -840,7 +907,6 @@ public class BourseCommand implements Command, Listener {
             return;
         }
 
-        // Проверяем баланс
         if (walletManager.getPlayerWallet(player.getName()).getSlots().getOrDefault(sellCurrency, 0) < sellAmount) {
             String message = Economy.getInstance().getConfig().getString("messages.bourse.insufficient_funds", "&cНедостаточно средств!")
                     .replace("{currency}", sellCurrency)
@@ -850,12 +916,10 @@ public class BourseCommand implements Command, Listener {
             return;
         }
 
-        // Создаем ордер
         Order order = new Order(0, player.getName(), sellCurrency, buyCurrency, sellAmount, buyAmount);
         BourseManager bourseManager = BourseManager.getInstance();
 
         if (bourseManager.addOrder(order)) {
-            // Получаем ID созданного ордера из базы данных
             int createdOrderId = getLastInsertedOrderId(player.getName());
             setLastCreatedOrderId(createdOrderId);
 
@@ -869,9 +933,7 @@ public class BourseCommand implements Command, Listener {
             player.sendMessage(colorize("&7Ордеров: " + (currentOrders + 1) + "/" + (maxOrders == -1 ? "∞" : maxOrders)));
             player.sendMessage(colorize("&7Ваши " + String.format("%,d", sellAmount) + " " + sellCurrency + " заблокированы до исполнения ордера"));
 
-            // Логируем создание ордера
             database.logTransaction(player.getName(), null, sellCurrency, sellAmount, "ORDER_CREATE", "Order created on bourse");
-
         } else {
             player.sendMessage(colorize("&cОшибка при создании ордера!"));
         }
@@ -880,7 +942,8 @@ public class BourseCommand implements Command, Listener {
     private int getLastInsertedOrderId(String playerName) {
         Database database = Economy.getInstance().getDatabase();
         try (Connection conn = database.getConnection()) {
-            String sql = "SELECT id FROM bourse_orders WHERE player_name = ? ORDER BY id DESC LIMIT 1";
+            // Используем таблицу orders и поле nickname
+            String sql = "SELECT id FROM orders WHERE nickname = ? ORDER BY id DESC LIMIT 1";
             try (PreparedStatement stmt = conn.prepareStatement(sql)) {
                 stmt.setString(1, playerName);
                 try (ResultSet rs = stmt.executeQuery()) {
@@ -902,7 +965,6 @@ public class BourseCommand implements Command, Listener {
             Database database = Economy.getInstance().getDatabase();
             WalletManager walletManager = Economy.getInstance().getWalletManager();
 
-            // Получаем ордер
             Order order = database.getOrderById(orderId);
             if (order == null) {
                 String message = Economy.getInstance().getConfig().getString("messages.bourse.order_not_found", "&cОрдер не найден!");
@@ -910,14 +972,12 @@ public class BourseCommand implements Command, Listener {
                 return;
             }
 
-            // Проверяем что игрок не покупает свой ордер
             if (order.getNickname().equals(player.getName())) {
                 String message = Economy.getInstance().getConfig().getString("messages.bourse.cannot_buy_own_order", "&cВы не можете купить свой собственный ордер!");
                 player.sendMessage(colorize(message));
                 return;
             }
 
-            // Проверяем баланс покупателя
             String buyCurrency = order.getBuyCurrency();
             int buyAmount = order.getBuyAmount();
 
@@ -930,7 +990,6 @@ public class BourseCommand implements Command, Listener {
                 return;
             }
 
-            // Выполняем обмен
             ExchangeResult result = bourseManager.exchange(orderId, player.getName());
 
             switch (result) {
@@ -941,7 +1000,6 @@ public class BourseCommand implements Command, Listener {
                     player.sendMessage(colorize("&7Вы отдали: " + String.format("%,d", buyAmount) + " " + buyCurrency));
                     player.sendMessage(colorize("&7Вы получили: " + String.format("%,d", order.getSellAmount()) + " " + order.getSellCurrency()));
 
-                    // Уведомляем продавца
                     Player seller = Bukkit.getPlayer(order.getNickname());
                     if (seller != null) {
                         seller.sendMessage(colorize(successMessage));
@@ -949,10 +1007,8 @@ public class BourseCommand implements Command, Listener {
                         seller.sendMessage(colorize("&7От игрока: " + player.getName()));
                     }
 
-                    // Логируем обмен
                     database.logTransaction(player.getName(), order.getNickname(), buyCurrency, buyAmount, "ORDER_EXCHANGE", "Order #" + orderId + " exchanged");
                     database.logTransaction(order.getNickname(), player.getName(), order.getSellCurrency(), order.getSellAmount(), "ORDER_EXCHANGE", "Order #" + orderId + " exchanged");
-
                     break;
 
                 case ORDER_NOT_FOUND:
@@ -1000,20 +1056,16 @@ public class BourseCommand implements Command, Listener {
         Database database = Economy.getInstance().getDatabase();
         WalletManager walletManager = Economy.getInstance().getWalletManager();
 
-        // Возвращаем валюту игроку
         walletManager.putMoney(player.getName(), order.getSellCurrency(), order.getSellAmount());
 
-        // Удаляем ордер
         if (database.cancelPlayerOrder(order.getId(), player.getName())) {
             String message = Economy.getInstance().getConfig().getString("messages.bourse.order_cancelled", "&aОрдер #{id} отменен!")
                     .replace("{id}", String.valueOf(order.getId()));
             player.sendMessage(colorize(message));
             player.sendMessage(colorize("&7Возвращено: " + String.format("%,d", order.getSellAmount()) + " " + order.getSellCurrency()));
 
-            // Логируем отмену
             database.logTransaction(player.getName(), null, order.getSellCurrency(), order.getSellAmount(),
                     "ORDER_CANCEL", "Order #" + order.getId() + " cancelled by player");
-
         } else {
             player.sendMessage(colorize("&cОшибка при отмене ордера!"));
         }
@@ -1032,14 +1084,10 @@ public class BourseCommand implements Command, Listener {
         int cancelledCount = 0;
 
         for (Order order : playerOrders) {
-            // Возвращаем валюту
             walletManager.putMoney(player.getName(), order.getSellCurrency(), order.getSellAmount());
 
-            // Отменяем ордер
             if (database.cancelPlayerOrder(order.getId(), player.getName())) {
                 cancelledCount++;
-
-                // Логируем отмену
                 database.logTransaction(player.getName(), null, order.getSellCurrency(), order.getSellAmount(),
                         "ORDER_CANCEL_ALL", "Order #" + order.getId() + " cancelled (cancel all)");
             }
@@ -1092,36 +1140,5 @@ public class BourseCommand implements Command, Listener {
 
     private String colorize(String text) {
         return text.replace("&", "§");
-    }
-
-    private void openCreateOrderGUI(Player player, String sellCurrency, String buyCurrency) {
-        Inventory gui = Bukkit.createInventory(null, 27, colorize("&6Создать ордер: " + sellCurrency + " → " + buyCurrency));
-
-        // Инструкция
-        ItemStack instruction = new ItemStack(Material.BOOK);
-        ItemMeta instructionMeta = instruction.getItemMeta();
-        instructionMeta.setDisplayName(colorize("&e&lИНСТРУКЦИЯ"));
-        instructionMeta.setLore(Arrays.asList(
-                colorize("&7Используйте команду:"),
-                colorize("&f/bourse add " + sellCurrency + " <кол-во> " + buyCurrency + " <кол-во>"),
-                colorize("&7"),
-                colorize("&7Пример:"),
-                colorize("&f/bourse add " + sellCurrency + " 100 " + buyCurrency + " 50")
-        ));
-        instruction.setItemMeta(instructionMeta);
-        gui.setItem(13, instruction);
-
-        // Кнопка назад
-        ItemStack backButton = new ItemStack(Material.ARROW);
-        ItemMeta backMeta = backButton.getItemMeta();
-        backMeta.setDisplayName(colorize("&cНазад"));
-        backButton.setItemMeta(backMeta);
-        gui.setItem(18, backButton);
-
-        player.openInventory(gui);
-
-        // Показываем команду в чате
-        player.sendMessage(colorize("&7Создание ордера для пары " + sellCurrency + "/" + buyCurrency + ":"));
-        player.sendMessage(colorize("&f/bourse add " + sellCurrency + " <количество> " + buyCurrency + " <количество>"));
     }
 }
